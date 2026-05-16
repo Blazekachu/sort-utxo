@@ -31,16 +31,18 @@ export default function Home() {
   const isTestnet = wallet.connected && isTestnetAddress(wallet.paymentAddress);
 
   const runScan = useCallback(async () => {
-    if (!wallet.connected) return;
+    // Read wallet directly from store to avoid stale closure
+    const w = useSortStore.getState().wallet;
+    if (!w.connected) return;
 
     try {
       setScanStatus({ state: 'scanning', scanned: 0, total: 0 });
 
-      await setMempoolNetwork(wallet.paymentAddress);
+      await setMempoolNetwork(w.paymentAddress);
 
       const [taprootUtxos, paymentUtxos] = await Promise.all([
-        fetchUtxos(wallet.taprootAddress),
-        fetchUtxos(wallet.paymentAddress),
+        fetchUtxos(w.taprootAddress),
+        fetchUtxos(w.paymentAddress),
       ]);
 
       const allRaw: Array<Utxo & { source: 'taproot' | 'payment' }> = [];
@@ -67,7 +69,7 @@ export default function Home() {
 
       const labeled = await scanAndLabelUtxos(
         allRaw,
-        isTestnetAddress(wallet.paymentAddress),
+        isTestnetAddress(w.paymentAddress),
         (scanned, total) => setScanStatus({ state: 'scanning', scanned, total }),
       );
 
@@ -81,7 +83,7 @@ export default function Home() {
       const msg = err instanceof Error ? err.message : 'Scan failed';
       setScanStatus({ state: 'error', message: msg, failedCount: 0 });
     }
-  }, [wallet, setScanStatus, setUtxos, setFeeRates, setUnconfirmedCount]);
+  }, [setScanStatus, setUtxos, setFeeRates, setUnconfirmedCount]);
 
   const misplacedCount = utxos.filter((u) => classifyPlacement(u) === 'misplaced').length;
   const allCorrect = scanStatus.state === 'done' && utxos.length > 0 && misplacedCount === 0;

@@ -54,10 +54,17 @@ export async function connectWallet(provider: WalletProvider = 'sats-connect'): 
   return { connected: true, taprootAddress: tapAddr, paymentAddress: payAddr, publicKey: pubKey };
 }
 
+export interface SignResult {
+  /** Present when the wallet broadcast the transaction through its own backend. */
+  txid?: string;
+  /** Signed PSBT (base64), present when the wallet returns it for a fallback broadcast. */
+  signedPsbt?: string;
+}
+
 export async function signPsbt(
   psbtBase64: string,
   inputsToSign: Array<{ index: number; address: string }>
-): Promise<string> {
+): Promise<SignResult> {
   const signInputs: Record<string, number[]> = {};
   for (const { address, index } of inputsToSign) {
     if (!signInputs[address]) signInputs[address] = [];
@@ -66,10 +73,12 @@ export async function signPsbt(
 
   if (activeProvider === 'leather') return signPsbtLeather(psbtBase64, signInputs);
 
+  // broadcast: true — the wallet signs AND broadcasts through its own backend.
+  // The caller falls back to a manual broadcast when no txid comes back.
   const response = await Wallet.request('signPsbt', {
     psbt: psbtBase64,
     signInputs,
-    broadcast: false,
+    broadcast: true,
   });
 
   if (response.status === 'error') {
@@ -78,7 +87,8 @@ export async function signPsbt(
     throw new Error((response.error as { message?: string }).message ?? 'Failed to sign PSBT');
   }
 
-  return response.result.psbt;
+  const result = response.result as { psbt?: string; txid?: string };
+  return { txid: result.txid, signedPsbt: result.psbt };
 }
 
 export function disconnectWallet(): WalletState {
@@ -147,14 +157,15 @@ async function connectLeather(): Promise<WalletState> {
   return { connected: true, taprootAddress: tapAddr, paymentAddress: payAddr, publicKey: pubKey };
 }
 
-async function signPsbtLeather(psbtBase64: string, signInputs: Record<string, number[]>): Promise<string> {
+async function signPsbtLeather(psbtBase64: string, signInputs: Record<string, number[]>): Promise<SignResult> {
   const provider = getLeatherProvider();
   const result = await provider.request('signPsbt', {
     hex: hexFromBase64(psbtBase64),
     signAtIndex: Object.values(signInputs).flat(),
-    broadcast: false,
-  }) as { result: { hex: string } };
-  return base64FromHex(result.result.hex);
+    broadcast: true,
+  }) as { result: { hex?: string; txid?: string } };
+  const { hex, txid } = result.result;
+  return { txid, signedPsbt: hex ? base64FromHex(hex) : undefined };
 }
 
 function hexFromBase64(b64: string): string {

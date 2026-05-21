@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { computeSortOutputs, validateSortInputs } from '../sort';
+import * as bitcoin from 'bitcoinjs-lib';
+import { computeDustOutputs, planSort, buildSortPsbt } from '../sort';
 import type { LabeledUtxo } from '@/types';
 
 function makeLabeledUtxo(overrides: Partial<LabeledUtxo> & Pick<LabeledUtxo, 'label' | 'source' | 'value'>): LabeledUtxo {
@@ -11,67 +12,143 @@ function makeLabeledUtxo(overrides: Partial<LabeledUtxo> & Pick<LabeledUtxo, 'la
   };
 }
 
-describe('computeSortOutputs', () => {
-  it('moves a rune UTXO from payment to taproot with 546 sats', () => {
+describe('computeDustOutputs', () => {
+  it('creates a 546-sat taproot output for a rune UTXO', () => {
     const utxos: LabeledUtxo[] = [
       makeLabeledUtxo({ label: 'rune', source: 'payment', value: 546 }),
     ];
-    const outputs = computeSortOutputs(utxos, 'bc1ptaproot', 'bc1qpayment');
-    expect(outputs).toEqual([
+    expect(computeDustOutputs(utxos, 'bc1ptaproot')).toEqual([
       { address: 'bc1ptaproot', value: 546n },
     ]);
   });
 
-  it('moves a plain UTXO from taproot to payment', () => {
+  it('creates no output for a plain UTXO (consolidated in the PSBT instead)', () => {
     const utxos: LabeledUtxo[] = [
       makeLabeledUtxo({ label: 'plain', source: 'taproot', value: 50000 }),
     ];
-    const outputs = computeSortOutputs(utxos, 'bc1ptaproot', 'bc1qpayment');
-    expect(outputs).toEqual([
-      { address: 'bc1qpayment', value: 50000n },
-    ]);
+    expect(computeDustOutputs(utxos, 'bc1ptaproot')).toEqual([]);
   });
 
-  it('creates separate outputs for each rune/inscription UTXO (no consolidation)', () => {
+  it('creates a separate 546-sat output for each rune/inscription UTXO', () => {
     const utxos: LabeledUtxo[] = [
       makeLabeledUtxo({ label: 'rune', source: 'payment', value: 546, txid: 'a'.repeat(64), vout: 0 }),
       makeLabeledUtxo({ label: 'inscription', source: 'payment', value: 546, txid: 'b'.repeat(64), vout: 1 }),
     ];
-    const outputs = computeSortOutputs(utxos, 'bc1ptaproot', 'bc1qpayment');
-    expect(outputs).toHaveLength(2);
-    expect(outputs[0]).toEqual({ address: 'bc1ptaproot', value: 546n });
-    expect(outputs[1]).toEqual({ address: 'bc1ptaproot', value: 546n });
-  });
-
-  it('consolidates plain UTXOs into a single output', () => {
-    const utxos: LabeledUtxo[] = [
-      makeLabeledUtxo({ label: 'plain', source: 'taproot', value: 30000, txid: 'a'.repeat(64) }),
-      makeLabeledUtxo({ label: 'plain', source: 'taproot', value: 20000, txid: 'b'.repeat(64) }),
-    ];
-    const outputs = computeSortOutputs(utxos, 'bc1ptaproot', 'bc1qpayment');
-    expect(outputs).toHaveLength(1);
-    expect(outputs[0]).toEqual({ address: 'bc1qpayment', value: 50000n });
+    const outputs = computeDustOutputs(utxos, 'bc1ptaproot');
+    expect(outputs).toEqual([
+      { address: 'bc1ptaproot', value: 546n },
+      { address: 'bc1ptaproot', value: 546n },
+    ]);
   });
 });
 
-describe('validateSortInputs', () => {
-  it('returns error when no plain sats available for fee', () => {
+describe('planSort', () => {
+  it('reports not ok when no plain sats are available for fee', () => {
     const utxos: LabeledUtxo[] = [
       makeLabeledUtxo({ label: 'rune', source: 'payment', value: 546 }),
     ];
-    const result = validateSortInputs(utxos, [], 10);
-    expect(result.valid).toBe(false);
-    expect(result.error).toContain('Not enough plain sats');
+    const plan = planSort({ selectedUtxos: utxos, availableFeeUtxos: [], feeRate: 10 });
+    expect(plan.ok).toBe(false);
+    expect(plan.error).toContain('Not enough plain sats');
   });
 
-  it('returns valid when plain sats cover fee', () => {
+  it('is ok with no extra fee UTXOs needed when a single one covers the fee', () => {
     const utxos: LabeledUtxo[] = [
       makeLabeledUtxo({ label: 'rune', source: 'payment', value: 546 }),
     ];
     const feeUtxos: LabeledUtxo[] = [
       makeLabeledUtxo({ label: 'plain', source: 'payment', value: 50000, txid: 'f'.repeat(64) }),
     ];
-    const result = validateSortInputs(utxos, feeUtxos, 10);
-    expect(result.valid).toBe(true);
+    const plan = planSort({ selectedUtxos: utxos, availableFeeUtxos: feeUtxos, feeRate: 10 });
+    expect(plan.ok).toBe(true);
+    expect(plan.feeUtxos).toHaveLength(1);
+    expect(plan.estimatedFee).toBeGreaterThan(0);
+  });
+
+  it('funds the fee from a moved plain UTXO without any separate fee UTXO', () => {
+    const utxos: LabeledUtxo[] = [
+      makeLabeledUtxo({ label: 'plain', source: 'taproot', value: 50000 }),
+    ];
+    const plan = planSort({ selectedUtxos: utxos, availableFeeUtxos: [], feeRate: 10 });
+    expect(plan.ok).toBe(true);
+    expect(plan.feeUtxos).toHaveLength(0);
+  });
+
+  it('selects multiple fee UTXOs when one is not enough', () => {
+    const utxos: LabeledUtxo[] = [
+      makeLabeledUtxo({ label: 'inscription', source: 'payment', value: 546 }),
+    ];
+    const feeUtxos: LabeledUtxo[] = Array.from({ length: 5 }, (_, i) =>
+      makeLabeledUtxo({ label: 'plain', source: 'payment', value: 1500, vout: i }),
+    );
+    const plan = planSort({ selectedUtxos: utxos, availableFeeUtxos: feeUtxos, feeRate: 10 });
+    expect(plan.ok).toBe(true);
+    expect(plan.feeUtxos.length).toBeGreaterThan(1);
+  });
+
+  it('does not pick fee UTXOs too small to cover their own input cost', () => {
+    const utxos: LabeledUtxo[] = [
+      makeLabeledUtxo({ label: 'rune', source: 'payment', value: 546 }),
+    ];
+    // 500-sat UTXOs at 10 sat/vB cost ~680 sats each to spend — they only
+    // deepen the shortfall, so planSort must not select them.
+    const feeUtxos: LabeledUtxo[] = Array.from({ length: 10 }, (_, i) =>
+      makeLabeledUtxo({ label: 'plain', source: 'payment', value: 500, vout: i }),
+    );
+    const plan = planSort({ selectedUtxos: utxos, availableFeeUtxos: feeUtxos, feeRate: 10 });
+    expect(plan.ok).toBe(false);
+    expect(plan.feeUtxos).toHaveLength(0);
+  });
+});
+
+describe('buildSortPsbt', () => {
+  // BIP86 / BIP84 mainnet test-vector addresses.
+  const TAPROOT = 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr';
+  const PAYMENT = 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu';
+
+  it('deducts the fee from a moved plain UTXO with no separate fee UTXO', () => {
+    const selected: LabeledUtxo[] = [
+      makeLabeledUtxo({ label: 'plain', source: 'taproot', value: 50000 }),
+    ];
+    const { psbt, inputsToSign } = buildSortPsbt({
+      selectedUtxos: selected,
+      additionalFeeUtxos: [],
+      taprootAddress: TAPROOT,
+      paymentAddress: PAYMENT,
+      internalPubkey: new Uint8Array(32).fill(2),
+      feeRate: 10,
+      network: bitcoin.networks.bitcoin,
+    });
+
+    expect(inputsToSign).toEqual([{ index: 0, address: TAPROOT }]);
+    // A single consolidated segwit output: 50000 - fee. The fee comes out of
+    // the moved plain value — no separate fee UTXO was needed.
+    expect(psbt.txOutputs).toHaveLength(1);
+    expect(psbt.txOutputs[0].address).toBe(PAYMENT);
+    expect(psbt.txOutputs[0].value).toBe(48890n);
+  });
+
+  it('keeps each rune output as its own 546-sat taproot output', () => {
+    const selected: LabeledUtxo[] = [
+      makeLabeledUtxo({ label: 'rune', source: 'payment', value: 546, vout: 0 }),
+    ];
+    const feeUtxo: LabeledUtxo[] = [
+      makeLabeledUtxo({ label: 'plain', source: 'payment', value: 50000, txid: 'f'.repeat(64) }),
+    ];
+    const { psbt } = buildSortPsbt({
+      selectedUtxos: selected,
+      additionalFeeUtxos: feeUtxo,
+      taprootAddress: TAPROOT,
+      paymentAddress: PAYMENT,
+      internalPubkey: new Uint8Array(32).fill(2),
+      feeRate: 10,
+      network: bitcoin.networks.bitcoin,
+    });
+
+    // Output 0: the rune's own 546-sat taproot output. Output 1: consolidated change.
+    expect(psbt.txOutputs).toHaveLength(2);
+    expect(psbt.txOutputs[0].address).toBe(TAPROOT);
+    expect(psbt.txOutputs[0].value).toBe(546n);
+    expect(psbt.txOutputs[1].address).toBe(PAYMENT);
   });
 });

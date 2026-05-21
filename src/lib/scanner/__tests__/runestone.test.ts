@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decodeVarint, parseRunestonePointer, isRunestoneOutput } from '../runestone';
+import { decodeVarint, parseRunestonePointer, parseRunestone, isRunestoneOutput } from '../runestone';
 
 describe('decodeVarint', () => {
   it('decodes single-byte varint', () => {
@@ -61,5 +61,36 @@ describe('parseRunestonePointer', () => {
     const payload = new Uint8Array([0x02, 0x01, 0x04, 0x00, 0x16, 0x02]);
     const pointer = parseRunestonePointer(payload);
     expect(pointer).toBe(2);
+  });
+
+  it('does not read edict bytes after the Body tag as a pointer', () => {
+    // Body tag (0), then one edict (block=1, tx=2, amount=22, output=3).
+    // The amount 22 must NOT be mistaken for a Pointer tag.
+    const payload = new Uint8Array([0x00, 0x01, 0x02, 0x16, 0x03]);
+    expect(parseRunestonePointer(payload)).toBeNull();
+  });
+});
+
+describe('parseRunestone', () => {
+  it('extracts the pointer field with no edicts', () => {
+    const { pointer, edictOutputs } = parseRunestone(new Uint8Array([0x16, 0x01]));
+    expect(pointer).toBe(1);
+    expect(edictOutputs.size).toBe(0);
+  });
+
+  it('collects edict output indices after the Body tag', () => {
+    // pointer=1, Body, edict (block=1, tx=2, amount=10, output=3)
+    const { pointer, edictOutputs } = parseRunestone(
+      new Uint8Array([0x16, 0x01, 0x00, 0x01, 0x02, 0x0a, 0x03]),
+    );
+    expect(pointer).toBe(1);
+    expect([...edictOutputs]).toEqual([3]);
+  });
+
+  it('collects edict outputs even when no pointer is present', () => {
+    const payload = new Uint8Array([0x00, 0x01, 0x02, 0x16, 0x03]);
+    const { pointer, edictOutputs } = parseRunestone(payload);
+    expect(pointer).toBeNull();
+    expect([...edictOutputs]).toEqual([3]);
   });
 });

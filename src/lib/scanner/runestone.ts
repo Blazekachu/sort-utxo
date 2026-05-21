@@ -1,4 +1,5 @@
 const TAG_POINTER = 22n;
+const TAG_BODY = 0n;
 
 /**
  * Decode a single LEB128 varint from buffer at offset.
@@ -76,38 +77,93 @@ export function extractRunestonePayload(scriptHex: string): Uint8Array | null {
   return result;
 }
 
+export interface RunestoneFields {
+  /** Output index designated by the Pointer field, or null if absent. */
+  pointer: number | null;
+  /** Output indices referenced by edicts — every output that receives runes. */
+  edictOutputs: Set<number>;
+}
+
 /**
- * Parse Runestone tag-value pairs and extract the Pointer value.
- * Returns the pointer output index or null if not present.
+ * Parse a Runestone payload into the fields relevant for UTXO labeling.
+ *
+ * The payload is a sequence of tag/value integer pairs. The Body tag (0) is
+ * special and always last: everything after it is edicts, NOT tag/value
+ * pairs. Scanning past the Body tag would misread edict integers as tags —
+ * e.g. an edict amount of 22 would be mistaken for a Pointer field.
  */
-export function parseRunestonePointer(payload: Uint8Array): number | null {
+export function parseRunestone(payload: Uint8Array): RunestoneFields {
+  let pointer: number | null = null;
+  const edictOutputs = new Set<number>();
   let offset = 0;
+
   while (offset < payload.length) {
     let tag: bigint;
     let tagBytes: number;
     try {
       [tag, tagBytes] = decodeVarint(payload, offset);
     } catch {
-      return null;
+      break;
     }
     offset += tagBytes;
 
-    if (offset >= payload.length) return null;
+    if (tag === TAG_BODY) {
+      // Everything after the Body tag is edicts — parse separately.
+      parseEdicts(payload, offset, edictOutputs);
+      break;
+    }
+
+    if (offset >= payload.length) break;
 
     let value: bigint;
     let valueBytes: number;
     try {
       [value, valueBytes] = decodeVarint(payload, offset);
     } catch {
-      return null;
+      break;
     }
     offset += valueBytes;
 
-    if (tag === TAG_POINTER) {
-      return Number(value);
+    if (tag === TAG_POINTER && pointer === null) {
+      pointer = Number(value);
     }
   }
-  return null;
+
+  return { pointer, edictOutputs };
+}
+
+/**
+ * Parse the edict section of a Runestone Body. Each edict is four varints:
+ * (rune block delta, rune tx delta, amount, output). Collects the output
+ * index of every edict. A trailing partial group marks a cenotaph; it is
+ * ignored (the outputs already collected are still honored).
+ */
+function parseEdicts(payload: Uint8Array, start: number, outputs: Set<number>): void {
+  let offset = start;
+  while (offset < payload.length) {
+    const fields: bigint[] = [];
+    for (let f = 0; f < 4; f++) {
+      if (offset >= payload.length) return;
+      let v: bigint;
+      let n: number;
+      try {
+        [v, n] = decodeVarint(payload, offset);
+      } catch {
+        return;
+      }
+      fields.push(v);
+      offset += n;
+    }
+    // fields[3] is the output index this edict allocates runes to.
+    outputs.add(Number(fields[3]));
+  }
+}
+
+/**
+ * Backwards-compatible helper: extract only the Pointer value.
+ */
+export function parseRunestonePointer(payload: Uint8Array): number | null {
+  return parseRunestone(payload).pointer;
 }
 
 function hexToBytes(hex: string): Uint8Array {

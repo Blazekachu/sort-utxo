@@ -1,7 +1,7 @@
 import type { Utxo, LabeledUtxo, UtxoLabel } from '@/types';
 import { labelUtxosViaOrd } from '@/lib/api/ord';
 import { fetchTx } from '@/lib/api/mempool';
-import { isRunestoneOutput, extractRunestonePayload, parseRunestonePointer } from './runestone';
+import { isRunestoneOutput, extractRunestonePayload, parseRunestone } from './runestone';
 import { hasInscriptionEnvelope } from './inscription';
 
 interface TxVout {
@@ -16,7 +16,13 @@ interface TxVin {
 
 /**
  * Label a single UTXO by analyzing its creating transaction (for testnet4).
- * Checks for Runestone pointer match and inscription envelope.
+ *
+ * This is best-effort: it can positively identify assets in the immediate
+ * creating TX (a rune etch/mint/transfer, an inscription reveal), but it
+ * CANNOT detect an asset that was transferred by an ordinary key-path spend
+ * — a transferred inscription leaves no envelope in its parent TX. Callers
+ * must therefore never treat a testnet4 'plain' label as authoritative for
+ * spending decisions (see the fee-UTXO safety threshold in SortButton).
  */
 export function labelUtxoFromTx(
   tx: Record<string, unknown>,
@@ -25,34 +31,56 @@ export function labelUtxoFromTx(
   const outputs = tx.vout as TxVout[];
   const inputs = tx.vin as TxVin[];
 
-  // 1. Check for Runestone OP_RETURN → extract pointer
-  for (const out of outputs) {
-    if (isRunestoneOutput(out.scriptpubkey)) {
-      const payload = extractRunestonePayload(out.scriptpubkey);
-      if (payload) {
-        const pointer = parseRunestonePointer(payload);
-        if (pointer !== null && pointer === vout) {
-          return { label: 'rune' };
+  // 1. Runestone: a rune-bearing output is the Pointer output, the default
+  //    output (first non-OP_RETURN) when no Pointer is set, or any output
+  //    referenced by an edict. Over-labeling as 'rune' is safe (the asset
+  //    just goes to taproot); missing one risks it being spent as fee.
+  for (let i = 0; i < outputs.length; i++) {
+    if (!isRunestoneOutput(outputs[i].scriptpubkey)) continue;
+
+    const payload = extractRunestonePayload(outputs[i].scriptpubkey);
+    if (!payload) continue;
+
+    const runestoneIndex = i;
+    const { pointer, edictOutputs } = parseRunestone(payload);
+    const runeOutputs = new Set<number>();
+
+    if (pointer !== null) {
+      runeOutputs.add(pointer);
+    } else {
+      const defaultOutput = outputs.findIndex((_, idx) => idx !== runestoneIndex);
+      if (defaultOutput !== -1) runeOutputs.add(defaultOutput);
+    }
+
+    for (const o of edictOutputs) {
+      if (o >= outputs.length) {
+        // Edict targets "all outputs" (or is a cenotaph) — treat every
+        // non-Runestone output as a possible rune carrier.
+        for (let k = 0; k < outputs.length; k++) {
+          if (k !== runestoneIndex) runeOutputs.add(k);
         }
-        // Default pointer: runes go to output 0
-        if (pointer === null && vout === 0) {
-          return { label: 'rune' };
-        }
+      } else {
+        runeOutputs.add(o);
       }
+    }
+
+    if (vout !== runestoneIndex && runeOutputs.has(vout)) {
+      return { label: 'rune' };
     }
   }
 
-  // 2. Check for inscription envelope in witness data
+  // 2. Inscription envelope in witness data. Only the reveal transaction can
+  //    be identified this way; a transferred inscription is undetectable.
   for (const vin of inputs) {
     if (vin.witness && hasInscriptionEnvelope(vin.witness)) {
-      // Inscription output is typically the first non-OP_RETURN output (vout 0)
+      // Reveal inscriptions land on the first output by default.
       if (vout === 0) {
         return { label: 'inscription' };
       }
     }
   }
 
-  // 3. Default: plain sats
+  // 3. Default: plain sats (best-effort — see the doc comment above).
   return { label: 'plain' };
 }
 

@@ -1,3 +1,5 @@
+import * as bitcoin from 'bitcoinjs-lib';
+import * as ecc from 'tiny-secp256k1';
 import { estimateVBytes } from './sort';
 
 const DUST = 546;
@@ -101,4 +103,49 @@ export function planSatLedger(params: {
   // finalChange === 0: exact, no change output.
 
   return { ok: true, outputs, fee, estimatedVBytes, assetOutputIndices };
+}
+
+bitcoin.initEccLib(ecc);
+
+/**
+ * Assemble a PSBT from a sat-ledger layout. The `inputs` MUST be the SAME ordered
+ * list passed to planSatLedger (sat positions depend on input order). Outputs are
+ * added verbatim; the fee is implicit (sum(inputs) - sum(outputs)).
+ */
+export function buildSortPsbtFromLedger(params: {
+  inputs: LedgerInput[];
+  outputs: LedgerOutput[];
+  taprootAddress: string;
+  paymentAddress: string;
+  internalPubkey: Uint8Array;
+  network: bitcoin.Network;
+}): { psbt: bitcoin.Psbt; inputsToSign: Array<{ index: number; address: string }> } {
+  const { inputs, outputs, taprootAddress, paymentAddress, internalPubkey, network } = params;
+
+  const totalIn = inputs.reduce((s, u) => s + u.value, 0);
+  const totalOut = outputs.reduce((s, o) => s + o.value, 0);
+  if (totalOut > totalIn) throw new Error(`Outputs (${totalOut}) exceed inputs (${totalIn}).`);
+
+  const psbt = new bitcoin.Psbt({ network });
+  const inputsToSign: Array<{ index: number; address: string }> = [];
+
+  for (let i = 0; i < inputs.length; i++) {
+    const u = inputs[i];
+    const address = u.source === 'taproot' ? taprootAddress : paymentAddress;
+    const isTaproot = address.startsWith('bc1p') || address.startsWith('tb1p');
+    const psbtInput: Record<string, unknown> = {
+      hash: u.txid,
+      index: u.vout,
+      witnessUtxo: { script: bitcoin.address.toOutputScript(address, network), value: BigInt(u.value) },
+    };
+    if (isTaproot) psbtInput.tapInternalKey = internalPubkey;
+    psbt.addInput(psbtInput as unknown as Parameters<typeof psbt.addInput>[0]);
+    inputsToSign.push({ index: i, address });
+  }
+
+  for (const o of outputs) {
+    psbt.addOutput({ address: o.address, value: BigInt(o.value) });
+  }
+
+  return { psbt, inputsToSign };
 }

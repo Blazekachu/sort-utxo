@@ -76,6 +76,24 @@ export function planSort(params: {
     return { ok: false, error: 'No UTXOs selected.', feeUtxos: [], estimatedFee: 0, estimatedVBytes: 0 };
   }
 
+  // Offset guard (interim — until the sat-ledger builder ships). The current
+  // builder isolates each asset with a fixed 546 output by OUTPUT ORDER, which
+  // only lands the asset on its taproot output when the asset is at offset 0 of
+  // its UTXO. An inscription at a non-zero offset would be carried into the
+  // change output instead (NOT extracted). Block it until the sat-aware ledger
+  // handles offsets, so we never route an inscription to the wrong output.
+  for (const u of selectedUtxos) {
+    for (const a of u.assets) {
+      if (a.kind === 'inscription' && a.offset > 0) {
+        return {
+          ok: false,
+          error: `Inscription ${a.id.slice(0, 12)}… sits at offset ${a.offset} within its UTXO — extracting it needs sat-aware splitting (the sat-ledger builder, not yet shipped). Sorting is disabled for offset inscriptions to avoid routing the inscription to the wrong output.`,
+          feeUtxos: [], estimatedFee: 0, estimatedVBytes: 0,
+        };
+      }
+    }
+  }
+
   const numDustOutputs = selectedUtxos.filter((u) => u.label !== 'plain').length;
   // dust outputs + one consolidated segwit output
   const numOutputs = numDustOutputs + 1;

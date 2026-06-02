@@ -13,7 +13,7 @@ const P2TR_INPUT_VB = 57.5;
 const P2WPKH_INPUT_VB = 68;
 const OUTPUT_VB = 43;
 
-function estimateVBytes(taprootInputs: number, segwitInputs: number, outputs: number): number {
+export function estimateVBytes(taprootInputs: number, segwitInputs: number, outputs: number): number {
   return Math.ceil(
     TX_OVERHEAD_VB
       + taprootInputs * P2TR_INPUT_VB

@@ -102,34 +102,6 @@ describe('planSort', () => {
   });
 });
 
-describe('planSort offset guard', () => {
-  it('blocks an inscription at a non-zero offset (needs sat-aware extraction)', () => {
-    const selected: LabeledUtxo[] = [
-      makeLabeledUtxo({
-        label: 'inscription', source: 'payment', value: 13685,
-        assets: [{ kind: 'inscription', id: '7c16f5d1'.repeat(8) + 'i0', offset: 4126 }],
-      }),
-    ];
-    const plan = planSort({ selectedUtxos: selected, availableFeeUtxos: [], feeRate: 1 });
-    expect(plan.ok).toBe(false);
-    expect(plan.error).toMatch(/offset/i);
-  });
-
-  it('does not block an inscription at offset 0', () => {
-    const selected: LabeledUtxo[] = [
-      makeLabeledUtxo({
-        label: 'inscription', source: 'payment', value: 546,
-        assets: [{ kind: 'inscription', id: 'a'.repeat(64) + 'i0', offset: 0 }],
-      }),
-    ];
-    const feeUtxos: LabeledUtxo[] = [
-      makeLabeledUtxo({ label: 'plain', source: 'payment', value: 50000, txid: 'd'.repeat(64) }),
-    ];
-    const plan = planSort({ selectedUtxos: selected, availableFeeUtxos: feeUtxos, feeRate: 1 });
-    expect(plan.ok).toBe(true);
-  });
-});
-
 describe('buildSortPsbt', () => {
   // BIP86 / BIP84 mainnet test-vector addresses.
   const TAPROOT = 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr';

@@ -2,7 +2,7 @@
 
 import { useSortStore } from '@/store/sortStore';
 import { useSortPlan } from './useSortPlan';
-import { buildSortPsbt } from '@/lib/tx/sort';
+import { buildSortPsbtFromLedger } from '@/lib/tx/satLedger';
 import { signPsbt } from '@/lib/wallet/xverse';
 import { broadcastTx, bitcoinNetworkForAddress, mempoolTxUrl } from '@/lib/api/mempool';
 import * as bitcoin from 'bitcoinjs-lib';
@@ -10,17 +10,16 @@ import * as bitcoin from 'bitcoinjs-lib';
 export default function SortButton() {
   const wallet = useSortStore((s) => s.wallet);
   const selectedKeys = useSortStore((s) => s.selectedKeys);
-  const selectedFeeRate = useSortStore((s) => s.selectedFeeRate);
   const sortStatus = useSortStore((s) => s.sortStatus);
   const setSortStatus = useSortStore((s) => s.setSortStatus);
 
   // Hooks must run unconditionally — call useSortPlan before any early return.
-  const { plan, selectedUtxos } = useSortPlan();
+  const { result } = useSortPlan();
 
   if (selectedKeys.size === 0) return null;
 
   async function handleSort() {
-    if (!plan.ok) return;
+    if (!result.ok) return;
 
     try {
       setSortStatus({ state: 'building' });
@@ -29,15 +28,14 @@ export default function SortButton() {
       const fullPubkey = Buffer.from(wallet.publicKey, 'hex');
       const internalPubkey = fullPubkey.length === 33 ? fullPubkey.subarray(1) : fullPubkey;
 
-      // plan.feeUtxos is the exact fee-UTXO set planSort validated against,
-      // so the fee inside the PSBT matches the fee shown to the user.
-      const { psbt, inputsToSign } = buildSortPsbt({
-        selectedUtxos,
-        additionalFeeUtxos: plan.feeUtxos,
+      // result.inputs / result.ledger.outputs are the exact sat-ledger layout the
+      // user is shown, so the built PSBT matches the validated plan.
+      const { psbt, inputsToSign } = buildSortPsbtFromLedger({
+        inputs: result.inputs,
+        outputs: result.ledger.outputs,
         taprootAddress: wallet.taprootAddress,
         paymentAddress: wallet.paymentAddress,
         internalPubkey,
-        feeRate: selectedFeeRate,
         network,
       });
 
@@ -49,7 +47,7 @@ export default function SortButton() {
         // The wallet signed and broadcast the transaction through its own backend.
         txid = signed.txid;
       } else if (signed.signedPsbt) {
-        // Wallet signed but did not broadcast — fall back to mempool.space.
+        // Wallet signed but did not broadcast — fall back to the Esplora providers.
         setSortStatus({ state: 'broadcasting' });
         const signedPsbt = bitcoin.Psbt.fromBase64(signed.signedPsbt, { network });
         try {
@@ -81,8 +79,8 @@ export default function SortButton() {
 
   return (
     <div className="w-full flex flex-col gap-3">
-      {!plan.ok && (
-        <p className="text-sm text-red-400">{plan.error}</p>
+      {!result.ok && (
+        <p className="text-sm text-red-400">{result.error}</p>
       )}
 
       {sortStatus.state === 'done' && (
@@ -105,16 +103,16 @@ export default function SortButton() {
 
       <button
         onClick={handleSort}
-        disabled={!plan.ok || isLoading || sortStatus.state === 'done'}
+        disabled={!result.ok || isLoading || sortStatus.state === 'done'}
         className="w-full rounded-lg bg-orange-600 px-6 py-3 text-sm font-semibold text-white hover:bg-orange-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {isLoading ? loadingLabel : `Sort ${selectedKeys.size} UTXO${selectedKeys.size > 1 ? 's' : ''}`}
       </button>
 
-      {plan.ok && plan.estimatedFee > 0 && sortStatus.state !== 'done' && sortStatus.state !== 'error' && (
+      {result.ok && result.ledger.fee > 0 && sortStatus.state !== 'done' && sortStatus.state !== 'error' && (
         <p className="text-xs text-gray-500 text-center">
-          Estimated fee: ~{plan.estimatedFee.toLocaleString()} sats
-          {plan.feeUtxos.length > 0 && ` (+${plan.feeUtxos.length} fee input${plan.feeUtxos.length > 1 ? 's' : ''})`}
+          Estimated fee: ~{result.ledger.fee.toLocaleString()} sats
+          {result.feeUtxos.length > 0 && ` (+${result.feeUtxos.length} fee input${result.feeUtxos.length > 1 ? 's' : ''})`}
         </p>
       )}
     </div>

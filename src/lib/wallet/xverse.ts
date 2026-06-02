@@ -20,8 +20,11 @@ export async function connectWallet(provider: WalletProvider = 'sats-connect'): 
 
   if (provider === 'leather') return connectLeather();
 
-  const response = await Wallet.request('getAddresses', {
-    purposes: [AddressPurpose.Ordinals, AddressPurpose.Payment],
+  // Xverse 2.3+ rejects the legacy `getAddresses` RPC with ACCESS_DENIED unless
+  // a `wallet_connect` permission was granted first. `wallet_connect` is the
+  // one-shot replacement that requests permissions and returns addresses.
+  const response = await Wallet.request('wallet_connect', {
+    addresses: [AddressPurpose.Ordinals, AddressPurpose.Payment],
     message: 'Connect to Sort UTXO',
   });
 

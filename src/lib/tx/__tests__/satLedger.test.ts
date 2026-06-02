@@ -93,3 +93,36 @@ describe('planSatLedger — edge cases', () => {
     expect(plan.error).toMatch(/cover postage/i);
   });
 });
+
+describe('planSatLedger — multi-input', () => {
+  it('consolidates multiple plain inputs into one segwit change', () => {
+    const plan = planSatLedger({
+      inputs: [
+        input({ value: 20000, source: 'taproot', inscriptionOffsets: [0] }),
+        input({ value: 30000, source: 'payment', txid: 'b'.repeat(64) }),
+        input({ value: 10000, source: 'payment', txid: 'c'.repeat(64) }),
+      ],
+      taprootAddress: TAPROOT, paymentAddress: SEGWIT, feeRate: 1,
+    });
+    expect(plan.ok).toBe(true);
+    expect(plan.outputs.filter((o) => o.kind === 'inscription')).toHaveLength(1);
+    expect(plan.outputs.filter((o) => o.kind === 'change')).toHaveLength(1);
+  });
+
+  it('handles two inscriptions in different inputs, interleaving pre-pad + dust', () => {
+    const plan = planSatLedger({
+      inputs: [
+        input({ value: 10000, source: 'payment', inscriptionOffsets: [5000] }),
+        input({ value: 10000, source: 'payment', txid: 'b'.repeat(64), inscriptionOffsets: [2000] }),
+      ],
+      taprootAddress: TAPROOT, paymentAddress: SEGWIT, feeRate: 1,
+    });
+    expect(plan.ok).toBe(true);
+    // positions: 5000 (input0) and 10000+2000=12000 (input1) → two dust outputs
+    expect(plan.assetOutputIndices).toHaveLength(2);
+    plan.assetOutputIndices.forEach((i) => {
+      expect(plan.outputs[i].address).toBe(TAPROOT);
+      expect(plan.outputs[i].kind).toBe('inscription');
+    });
+  });
+});

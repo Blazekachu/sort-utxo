@@ -19,22 +19,38 @@ export interface Utxo {
   };
 }
 
-export type UtxoLabel = 'plain' | 'inscription' | 'rune';
+export type UtxoLabel = 'plain' | 'inscription' | 'rune' | 'unknown';
+
+/** A single on-chain asset carried by a UTXO, as reported by ord. */
+export type Asset =
+  | { kind: 'inscription'; id: string; offset: number } // offset = sats from output start
+  | { kind: 'rune'; name: string; amount: bigint; divisibility: number };
 
 export interface LabeledUtxo extends Utxo {
+  /**
+   * Derived summary label for existing consumers (UI, fee planning):
+   * 'plain' | 'inscription' | 'rune' | 'unknown'. Prefer `assets` for new code;
+   * `label` is computed from `assets` (or 'unknown' on a labeling failure).
+   */
   label: UtxoLabel;
   /** Which wallet address this UTXO belongs to */
   source: 'taproot' | 'payment';
-  /** Rune name if label is 'rune' */
+  /** Authoritative asset list from ord. [] === plain. */
+  assets: Asset[];
+  /** Rune name if this UTXO carries a rune (derived from `assets`). */
   runeName?: string;
-  /** Inscription ID if label is 'inscription' */
+  /** Inscription ID if this UTXO carries one (derived from `assets`). */
   inscriptionId?: string;
+  /** True when the UTXO carries an inscription (derived from `assets`). */
+  hasInscription?: boolean;
 }
 
 export type UtxoPlacement = 'misplaced' | 'correct';
 
-/** Returns whether a UTXO is in the correct address type */
+/** Returns whether a UTXO is in the correct address type. Fail-closed: an
+ *  `unknown` UTXO (ord could not authoritatively label it) is never moved. */
 export function classifyPlacement(utxo: LabeledUtxo): UtxoPlacement {
+  if (utxo.label === 'unknown') return 'correct';
   if (utxo.label === 'plain') {
     // Plain sats should be on segwit (payment)
     return utxo.source === 'payment' ? 'correct' : 'misplaced';

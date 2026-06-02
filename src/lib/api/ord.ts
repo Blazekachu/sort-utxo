@@ -1,4 +1,4 @@
-import type { OrdOutputResponse } from '@/types';
+import type { OrdOutputResponse, Asset } from '@/types';
 
 const PUBLIC_ORD_DEFAULT = 'https://ordinals.com';
 const ORD_BASE_MAINNET = (process.env.NEXT_PUBLIC_ORD_BASE_MAINNET || PUBLIC_ORD_DEFAULT).replace(/\/+$/, '');
@@ -55,6 +55,40 @@ export function labelFromOrdOutput(output: OrdOutputResponse): OrdLabel {
   if (inscriptionId) return { label: 'inscription', inscriptionId, runeName };
   if (runeName) return { label: 'rune', runeName };
   return { label: 'plain' };
+}
+
+/** Parse the trailing offset from an ord satpoint `txid:vout:offset`. */
+export function offsetFromSatpoint(satpoint: string): number {
+  const parts = satpoint.split(':');
+  const offset = Number(parts[parts.length - 1]);
+  if (!Number.isFinite(offset) || offset < 0) throw new Error(`Bad satpoint offset: ${satpoint}`);
+  return offset;
+}
+
+/** Resolve an inscription's offset within its current output via ord.
+ *  NOTE: local ord 0.27.1 omits `output`; derive from `satpoint` (runes-etch #12 lesson). */
+export async function getInscriptionOffset(id: string): Promise<number> {
+  const res = await fetchWithTimeout(`${ordBase()}/inscription/${encodeURIComponent(id)}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(`ord /inscription/${id} ${res.status}`);
+  const info = (await res.json()) as { satpoint: string };
+  return offsetFromSatpoint(info.satpoint);
+}
+
+/** Map an ord output to its asset list. `resolveOffset(id)` supplies each inscription's offset. */
+export function outputToAssets(
+  output: { inscriptions: string[]; runes: Record<string, { amount: number; divisibility: number }> },
+  resolveOffset: (id: string) => number,
+): Asset[] {
+  const assets: Asset[] = [];
+  for (const id of output.inscriptions) {
+    assets.push({ kind: 'inscription', id, offset: resolveOffset(id) });
+  }
+  for (const [name, bal] of Object.entries(output.runes)) {
+    assets.push({ kind: 'rune', name, amount: BigInt(bal.amount), divisibility: bal.divisibility });
+  }
+  return assets;
 }
 
 export async function fetchOrdOutput(txid: string, vout: number): Promise<OrdOutputResponse> {

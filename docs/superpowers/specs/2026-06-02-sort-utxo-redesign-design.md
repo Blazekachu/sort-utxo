@@ -179,7 +179,7 @@ Fee is the unassigned tail; it reduces the final segwit change. If the selection
 
 ## 12. Acceptance criteria
 
-1. On testnet4 with local ord healthy, the parent UTXO `420acce8…:3` is labeled **inscription on segwit → recommend move to taproot** (not plain).
+1. On testnet4 with local ord healthy, the parent UTXO `420acce8…:3` is labeled **inscription on segwit → recommend move to taproot** (not plain). **✅ VERIFIED 2026-06-02 (Plan 1, live):** after the ord-only scanner shipped, the tool detected the inscription, auto-selected it as misplaced, and built a sort tx for it (proving detection). That build also exposed that the *old* (non-sat-aware) builder routed the offset-4126 inscription into the segwit change output — caught at the wallet-sign preview before signing. An interim **offset guard** (`planSort` blocks offset>0 inscriptions, commit `0f7e73d`) now disables that path until Plan 2's sat-ledger builder ships.
 2. `planSatLedger` produces the §7.5 layout for that UTXO; unit tests for all §7.6 edge cases pass.
 3. A signed, broadcast sort tx places `7c16f5d1…i0` on a **taproot** output (verified via ord `/output/<new>:N`), with the remaining plain returned to segwit.
 4. Rune-bearing UTXOs are moved with a valid runestone (no cenotaph) or safely blocked if a valid runestone can't be built.

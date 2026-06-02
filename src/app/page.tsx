@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import { useSortStore } from '@/store/sortStore';
 import { setMempoolNetwork, fetchUtxos, fetchFeeRates } from '@/lib/api/mempool';
+import { setOrdNetwork } from '@/lib/api/ord';
 import { scanAndLabelUtxos } from '@/lib/scanner/label';
 import { classifyPlacement } from '@/types';
 import type { Utxo } from '@/types';
@@ -39,6 +40,7 @@ export default function Home() {
       setScanStatus({ state: 'scanning', scanned: 0, total: 0 });
 
       await setMempoolNetwork(w.paymentAddress);
+      setOrdNetwork(w.paymentAddress);
 
       const [taprootUtxos, paymentUtxos] = await Promise.all([
         fetchUtxos(w.taprootAddress),

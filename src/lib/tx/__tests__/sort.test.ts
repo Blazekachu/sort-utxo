@@ -8,6 +8,7 @@ function makeLabeledUtxo(overrides: Partial<LabeledUtxo> & Pick<LabeledUtxo, 'la
     txid: 'a'.repeat(64),
     vout: 0,
     status: { confirmed: true },
+    assets: [],
     ...overrides,
   };
 }

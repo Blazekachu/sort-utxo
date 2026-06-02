@@ -26,6 +26,6 @@ describe('outputToAssets', () => {
     expect(assets).toContainEqual({ kind: 'rune', name: 'PIZZA', amount: 5n, divisibility: 2 });
   });
   it('returns [] for a plain output', () => {
-    expect(outputToAssets({ value: 10000, inscriptions: [], runes: {} }, () => 0)).toEqual([]);
+    expect(outputToAssets({ inscriptions: [], runes: {} }, () => 0)).toEqual([]);
   });
 });

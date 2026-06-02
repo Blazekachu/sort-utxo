@@ -17,7 +17,7 @@ const nextConfig: NextConfig = {
               : "script-src 'self' 'unsafe-inline'",
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
             "font-src 'self' https://fonts.gstatic.com",
-            "connect-src 'self' https://mempool.space https://*.mempool.space https://mempool.emzy.de https://memepool.space https://ordinals.com",
+            "connect-src 'self' https://mempool.space https://*.mempool.space https://mempool.emzy.de https://memepool.space https://ordinals.com http://127.0.0.1:8080",
             "img-src 'self' data: blob:",
             "frame-ancestors 'none'",
           ].join('; '),

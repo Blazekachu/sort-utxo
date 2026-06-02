@@ -10,9 +10,14 @@ function truncateTxid(txid: string): string {
 }
 
 function typeLabel(utxo: LabeledUtxo): string {
-  if (utxo.label === 'rune') return utxo.runeName ? `Rune (${utxo.runeName})` : 'Rune';
-  if (utxo.label === 'inscription') return utxo.inscriptionId ? `Inscription (${utxo.inscriptionId.slice(0, 12)}...)` : 'Inscription';
-  return 'Plain';
+  const isRune = utxo.label === 'rune' || !!utxo.runeName;
+  const isInscription = utxo.label === 'inscription' || utxo.hasInscription || !!utxo.inscriptionId;
+
+  const parts: string[] = [];
+  if (isRune) parts.push(utxo.runeName ? `Rune (${utxo.runeName})` : 'Rune');
+  if (isInscription) parts.push(utxo.inscriptionId ? `Inscription (${utxo.inscriptionId.slice(0, 12)}...)` : 'Inscription');
+
+  return parts.length > 0 ? parts.join(' + ') : 'Plain';
 }
 
 function sourceLabel(source: 'taproot' | 'payment'): string {

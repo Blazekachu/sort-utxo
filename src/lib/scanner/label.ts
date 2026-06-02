@@ -1,147 +1,56 @@
-import type { Utxo, LabeledUtxo, UtxoLabel } from '@/types';
-import { labelUtxosViaOrd } from '@/lib/api/ord';
-import { fetchTx } from '@/lib/api/mempool';
-import { isRunestoneOutput, extractRunestonePayload, parseRunestone } from './runestone';
-import { hasInscriptionEnvelope } from './inscription';
+import type { Utxo, LabeledUtxo, UtxoLabel, Asset } from '@/types';
+import { assertOrdHealthy, fetchOrdOutput, getInscriptionOffset, outputToAssets } from '@/lib/api/ord';
 
-interface TxVout {
-  scriptpubkey: string;
-  value: number;
-  scriptpubkey_type: string;
-}
-
-interface TxVin {
-  witness: string[];
+/** Derive the summary `label` from an asset list. */
+function deriveLabel(assets: Asset[]): UtxoLabel {
+  if (assets.length === 0) return 'plain';
+  if (assets.some((a) => a.kind === 'inscription')) return 'inscription';
+  return 'rune';
 }
 
 /**
- * Label a single UTXO by analyzing its creating transaction (for testnet4).
- *
- * This is best-effort: it can positively identify assets in the immediate
- * creating TX (a rune etch/mint/transfer, an inscription reveal), but it
- * CANNOT detect an asset that was transferred by an ordinary key-path spend
- * — a transferred inscription leaves no envelope in its parent TX. Callers
- * must therefore never treat a testnet4 'plain' label as authoritative for
- * spending decisions (see the fee-UTXO safety threshold in SortButton).
- */
-export function labelUtxoFromTx(
-  tx: Record<string, unknown>,
-  vout: number,
-): { label: UtxoLabel; runeName?: string; inscriptionId?: string } {
-  const outputs = tx.vout as TxVout[];
-  const inputs = tx.vin as TxVin[];
-
-  // 1. Runestone: a rune-bearing output is the Pointer output, the default
-  //    output (first non-OP_RETURN) when no Pointer is set, or any output
-  //    referenced by an edict. Over-labeling as 'rune' is safe (the asset
-  //    just goes to taproot); missing one risks it being spent as fee.
-  for (let i = 0; i < outputs.length; i++) {
-    if (!isRunestoneOutput(outputs[i].scriptpubkey)) continue;
-
-    const payload = extractRunestonePayload(outputs[i].scriptpubkey);
-    if (!payload) continue;
-
-    const runestoneIndex = i;
-    const { pointer, edictOutputs } = parseRunestone(payload);
-    const runeOutputs = new Set<number>();
-
-    if (pointer !== null) {
-      runeOutputs.add(pointer);
-    } else {
-      const defaultOutput = outputs.findIndex((_, idx) => idx !== runestoneIndex);
-      if (defaultOutput !== -1) runeOutputs.add(defaultOutput);
-    }
-
-    for (const o of edictOutputs) {
-      if (o >= outputs.length) {
-        // Edict targets "all outputs" (or is a cenotaph) — treat every
-        // non-Runestone output as a possible rune carrier.
-        for (let k = 0; k < outputs.length; k++) {
-          if (k !== runestoneIndex) runeOutputs.add(k);
-        }
-      } else {
-        runeOutputs.add(o);
-      }
-    }
-
-    if (vout !== runestoneIndex && runeOutputs.has(vout)) {
-      return { label: 'rune' };
-    }
-  }
-
-  // 2. Inscription envelope in witness data. Only the reveal transaction can
-  //    be identified this way; a transferred inscription is undetectable.
-  for (const vin of inputs) {
-    if (vin.witness && hasInscriptionEnvelope(vin.witness)) {
-      // Reveal inscriptions land on the first output by default.
-      if (vout === 0) {
-        return { label: 'inscription' };
-      }
-    }
-  }
-
-  // 3. Default: plain sats (best-effort — see the doc comment above).
-  return { label: 'plain' };
-}
-
-/**
- * Scan and label all UTXOs. Uses ord API on mainnet, TX decoding on testnet4.
- * Throws if any UTXO cannot be labeled.
+ * Scan + label every UTXO authoritatively via ord (both networks). On testnet4,
+ * ord must be healthy first (fail-closed). A per-UTXO ord failure yields the
+ * `unknown` label (excluded from sorting) — never a silent `plain`.
  */
 export async function scanAndLabelUtxos(
   utxos: Array<Utxo & { source: 'taproot' | 'payment' }>,
   isTestnet: boolean,
   onProgress?: (scanned: number, total: number) => void,
 ): Promise<LabeledUtxo[]> {
+  if (isTestnet) await assertOrdHealthy();
+
   const total = utxos.length;
   const labeled: LabeledUtxo[] = [];
+  let scanned = 0;
 
-  if (!isTestnet) {
-    // Mainnet: use ord API
-    const ordLabels = await labelUtxosViaOrd(
-      utxos.map((u) => ({ txid: u.txid, vout: u.vout })),
-      (scanned) => onProgress?.(scanned, total),
-    );
-
-    for (const utxo of utxos) {
-      const key = `${utxo.txid}:${utxo.vout}`;
-      const ordLabel = ordLabels.get(key);
-      if (!ordLabel) throw new Error(`Failed to label UTXO ${key}`);
-      labeled.push({
-        ...utxo,
-        label: ordLabel.label,
-        runeName: ordLabel.label === 'rune' ? (ordLabel as { runeName: string }).runeName : undefined,
-        inscriptionId: ordLabel.label === 'inscription' ? (ordLabel as { inscriptionId: string }).inscriptionId : undefined,
-      });
+  for (const utxo of utxos) {
+    let assets: Asset[] = [];
+    let label: UtxoLabel;
+    try {
+      const output = await fetchOrdOutput(utxo.txid, utxo.vout);
+      const offsets = new Map<string, number>();
+      for (const id of output.inscriptions) offsets.set(id, await getInscriptionOffset(id));
+      assets = outputToAssets(output, (id) => offsets.get(id) ?? 0);
+      label = deriveLabel(assets);
+    } catch {
+      assets = [];
+      label = 'unknown';
     }
-  } else {
-    // Testnet4: fetch each TX and decode
-    const txCache = new Map<string, Record<string, unknown>>();
-    let scanned = 0;
 
-    for (const utxo of utxos) {
-      let tx = txCache.get(utxo.txid);
-      if (!tx) {
-        try {
-          tx = await fetchTx(utxo.txid);
-          txCache.set(utxo.txid, tx);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          throw new Error(`Failed to fetch TX ${utxo.txid.slice(0, 16)}...: ${msg}`);
-        }
-      }
+    const inscription = assets.find((a) => a.kind === 'inscription');
+    const rune = assets.find((a) => a.kind === 'rune');
+    labeled.push({
+      ...utxo,
+      label,
+      assets,
+      runeName: rune && rune.kind === 'rune' ? rune.name : undefined,
+      inscriptionId: inscription && inscription.kind === 'inscription' ? inscription.id : undefined,
+      hasInscription: inscription ? true : undefined,
+    });
 
-      const result = labelUtxoFromTx(tx, utxo.vout);
-      labeled.push({
-        ...utxo,
-        label: result.label,
-        runeName: result.runeName,
-        inscriptionId: result.inscriptionId,
-      });
-
-      scanned++;
-      onProgress?.(scanned, total);
-    }
+    scanned++;
+    onProgress?.(scanned, total);
   }
 
   return labeled;

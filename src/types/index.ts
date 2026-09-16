@@ -5,6 +5,10 @@ export interface WalletState {
   taprootAddress: string;
   paymentAddress: string;
   publicKey: string;
+  /** Payment address pubkey from wallet_connect; required to spend nested P2SH. */
+  paymentPublicKey?: string;
+  /** Wallet-reported chain. Compose uses this; Sort may ignore it. */
+  network?: 'mainnet' | 'signet';
 }
 
 // --- UTXO ---

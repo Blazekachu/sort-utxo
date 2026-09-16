@@ -1,5 +1,6 @@
 import Wallet, { AddressPurpose, RpcErrorCode } from 'sats-connect';
 import type { WalletState } from '@/types';
+import { parseWalletNetworkName } from '@/lib/compose/network';
 
 export type WalletProvider = 'sats-connect' | 'leather';
 
@@ -34,7 +35,9 @@ export async function connectWallet(provider: WalletProvider = 'sats-connect'): 
     throw new Error((response.error as { message?: string }).message ?? 'Failed to connect wallet');
   }
 
-  const { addresses } = response.result;
+  const { addresses, network } = response.result as typeof response.result & {
+    network?: { bitcoin?: { name?: string } };
+  };
   const ordinalsAddr = addresses.find((a) => a.purpose === AddressPurpose.Ordinals);
   const paymentAddr = addresses.find((a) => a.purpose === AddressPurpose.Payment);
 
@@ -43,6 +46,7 @@ export async function connectWallet(provider: WalletProvider = 'sats-connect'): 
   const tapAddr = ordinalsAddr.address;
   const payAddr = paymentAddr.address;
   const pubKey = ordinalsAddr.publicKey;
+  const paymentPubKey = paymentAddr.publicKey;
 
   if (!tapAddr || !/^(bc1p|tb1p)[a-z0-9]{58}$/i.test(tapAddr)) {
     throw new Error(`Invalid taproot address from wallet: ${tapAddr?.slice(0, 20)}`);
@@ -54,7 +58,14 @@ export async function connectWallet(provider: WalletProvider = 'sats-connect'): 
     throw new Error('Invalid public key from wallet: expected 32-33 byte hex');
   }
 
-  return { connected: true, taprootAddress: tapAddr, paymentAddress: payAddr, publicKey: pubKey };
+  return {
+    connected: true,
+    taprootAddress: tapAddr,
+    paymentAddress: payAddr,
+    publicKey: pubKey,
+    paymentPublicKey: paymentPubKey,
+    network: parseWalletNetworkName(network?.bitcoin?.name, tapAddr),
+  };
 }
 
 export interface SignResult {
@@ -77,6 +88,14 @@ export async function signPsbtForConsolidation(
   inputsToSign: Array<{ index: number; address: string }>
 ): Promise<SignResult> {
   return signPsbtWithBroadcast(psbtBase64, inputsToSign, false);
+}
+
+/** Signs without broadcasting so Compose can verify txid and layout first. */
+export async function signPsbtForCompose(
+  psbtBase64: string,
+  inputsToSign: Array<{ index: number; address: string }>,
+): Promise<SignResult> {
+  return signPsbtForConsolidation(psbtBase64, inputsToSign);
 }
 
 async function signPsbtWithBroadcast(
@@ -171,7 +190,14 @@ async function connectLeather(): Promise<WalletState> {
   if (!payAddr || payAddr.length < 20 || payAddr.length > 90) throw new Error(`Invalid payment address from wallet: ${payAddr?.slice(0, 20)}`);
   if (!pubKey || !/^[0-9a-f]{64,66}$/i.test(pubKey)) throw new Error('Invalid public key from wallet: expected 32-33 byte hex');
 
-  return { connected: true, taprootAddress: tapAddr, paymentAddress: payAddr, publicKey: pubKey };
+  return {
+    connected: true,
+    taprootAddress: tapAddr,
+    paymentAddress: payAddr,
+    publicKey: pubKey,
+    paymentPublicKey: paymentAddr.publicKey,
+    network: parseWalletNetworkName(undefined, tapAddr),
+  };
 }
 
 async function signPsbtLeather(

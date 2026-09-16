@@ -7,6 +7,12 @@ import { parseWalletNetworkName } from '@/lib/compose/network';
 import { setComposeMempoolNetwork, fetchComposeUtxos, fetchComposeFeeRates } from '@/lib/compose/mempool';
 import { scanComposeUtxos } from '@/lib/compose/scan';
 import ComposeWalletBar from '@/components/compose/ComposeWalletBar';
+import UtxoPicker from '@/components/compose/UtxoPicker';
+import OutputRows from '@/components/compose/OutputRows';
+import SatPreview from '@/components/compose/SatPreview';
+import OpReturnField from '@/components/compose/OpReturnField';
+import VanityField from '@/components/compose/VanityField';
+import ComposeSignButton from '@/components/compose/ComposeSignButton';
 
 export default function ComposePage() {
   const wallet = useComposeStore((s) => s.wallet);
@@ -14,6 +20,9 @@ export default function ComposePage() {
   const setScanStatus = useComposeStore((s) => s.setScanStatus);
   const setUtxos = useComposeStore((s) => s.setUtxos);
   const setFeeRates = useComposeStore((s) => s.setFeeRates);
+  const feeRates = useComposeStore((s) => s.feeRates);
+  const selectedFeeRate = useComposeStore((s) => s.selectedFeeRate);
+  const setSelectedFeeRate = useComposeStore((s) => s.setSelectedFeeRate);
 
   const chain = parseWalletNetworkName(wallet.network, wallet.paymentAddress);
 
@@ -70,6 +79,29 @@ export default function ComposePage() {
         )}
         {scanStatus.state === 'error' && (
           <p className="text-sm text-red-400">{scanStatus.message}</p>
+        )}
+        {scanStatus.state === 'done' && (
+          <>
+            <UtxoPicker />
+            <OutputRows />
+            {feeRates && (
+              <div className="flex items-center gap-2 text-xs text-gray-400">
+                <span>Fee rate</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={selectedFeeRate}
+                  onChange={(e) => setSelectedFeeRate(Number(e.target.value))}
+                  className="w-20 rounded-lg border border-gray-700 bg-gray-900 px-2 py-1 text-white"
+                />
+                <span>sat/vB (medium {feeRates.halfHourFee})</span>
+              </div>
+            )}
+            <OpReturnField />
+            <VanityField />
+            <SatPreview />
+            <ComposeSignButton />
+          </>
         )}
       </div>
     </main>

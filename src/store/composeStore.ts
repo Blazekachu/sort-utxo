@@ -54,6 +54,8 @@ export interface ComposeStore {
   setVanitySuffix: (v: string) => void;
   vanityTxid: string | null;
   setVanityTxid: (txid: string | null) => void;
+  vanityLocktime: number | null;
+  setVanityLocktime: (n: number | null) => void;
   scanStatus: ScanStatus;
   setScanStatus: (status: ScanStatus) => void;
   feeRates: FeeRates | null;
@@ -82,7 +84,7 @@ export const useComposeStore = create<ComposeStore>((set, get) => ({
       spendKeys.add(key);
       feeKeys.delete(key);
     }
-    set({ spendKeys, feeKeys, vanityTxid: null });
+    set({ spendKeys, feeKeys, vanityTxid: null, vanityLocktime: null });
   },
   toggleFee: (key) => {
     const utxo = get().utxos.find((u) => keyOf(u) === key);
@@ -94,24 +96,26 @@ export const useComposeStore = create<ComposeStore>((set, get) => ({
       feeKeys.add(key);
       spendKeys.delete(key);
     }
-    set({ spendKeys, feeKeys, vanityTxid: null });
+    set({ spendKeys, feeKeys, vanityTxid: null, vanityLocktime: null });
   },
   outputRows: [],
-  setOutputRows: (outputRows) => set({ outputRows, vanityTxid: null }),
+  setOutputRows: (outputRows) => set({ outputRows, vanityTxid: null, vanityLocktime: null }),
   opReturnText: '',
-  setOpReturnText: (opReturnText) => set({ opReturnText, vanityTxid: null }),
+  setOpReturnText: (opReturnText) => set({ opReturnText, vanityTxid: null, vanityLocktime: null }),
   vanityPrefix: '',
   vanitySuffix: '',
-  setVanityPrefix: (vanityPrefix) => set({ vanityPrefix, vanityTxid: null }),
-  setVanitySuffix: (vanitySuffix) => set({ vanitySuffix, vanityTxid: null }),
+  setVanityPrefix: (vanityPrefix) => set({ vanityPrefix, vanityTxid: null, vanityLocktime: null }),
+  setVanitySuffix: (vanitySuffix) => set({ vanitySuffix, vanityTxid: null, vanityLocktime: null }),
   vanityTxid: null,
   setVanityTxid: (vanityTxid) => set({ vanityTxid }),
+  vanityLocktime: null,
+  setVanityLocktime: (vanityLocktime) => set({ vanityLocktime }),
   scanStatus: { state: 'idle' },
   setScanStatus: (scanStatus) => set({ scanStatus }),
   feeRates: null,
   setFeeRates: (feeRates) => set({ feeRates, selectedFeeRate: feeRates.halfHourFee }),
   selectedFeeRate: 1,
-  setSelectedFeeRate: (selectedFeeRate) => set({ selectedFeeRate, vanityTxid: null }),
+  setSelectedFeeRate: (selectedFeeRate) => set({ selectedFeeRate, vanityTxid: null, vanityLocktime: null }),
   buildStatus: { state: 'idle' },
   setBuildStatus: (buildStatus) => set({ buildStatus }),
   reset: () => set({
@@ -124,6 +128,7 @@ export const useComposeStore = create<ComposeStore>((set, get) => ({
     vanityPrefix: '',
     vanitySuffix: '',
     vanityTxid: null,
+    vanityLocktime: null,
     scanStatus: { state: 'idle' },
     feeRates: null,
     selectedFeeRate: 1,

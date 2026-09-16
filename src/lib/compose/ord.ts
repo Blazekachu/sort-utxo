@@ -58,7 +58,7 @@ export async function getComposeInscriptionOffset(chain: ComposeChain, id: strin
 export interface ComposeOrdOutput {
   inscriptions: string[];
   runes: Record<string, { amount: number; divisibility: number }>;
-  value: number;
+  value?: number;
   sat_ranges?: [number, number][] | null;
 }
 

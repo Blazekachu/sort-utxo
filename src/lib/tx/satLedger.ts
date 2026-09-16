@@ -43,8 +43,16 @@ export function planSatLedger(params: {
   taprootAddress: string;
   paymentAddress: string;
   feeRate: number;
+  /** Extra outputs emitted by a caller before this ledger's sat walk. */
+  additionalOutputCount?: number;
+  /** Override input counts when a caller has value-neutral prefixed inputs. */
+  feeInputCounts?: { taproot: number; segwit: number };
 }): SatLedgerPlan {
-  const { inputs, taprootAddress, paymentAddress, feeRate } = params;
+  const {
+    inputs, taprootAddress, paymentAddress, feeRate,
+    additionalOutputCount = 0,
+    feeInputCounts,
+  } = params;
 
   const fail = (error: string): SatLedgerPlan =>
     ({ ok: false, error, outputs: [], fee: 0, estimatedVBytes: 0, assetOutputIndices: [] });
@@ -87,9 +95,9 @@ export function planSatLedger(params: {
   }
 
   // 3. Fee (sized assuming one change output) + final change.
-  const taprootInputs = inputs.filter((u) => u.source === 'taproot').length;
-  const segwitInputs = inputs.length - taprootInputs;
-  const estimatedVBytes = estimateVBytes(taprootInputs, segwitInputs, outputs.length + 1);
+  const taprootInputs = feeInputCounts?.taproot ?? inputs.filter((u) => u.source === 'taproot').length;
+  const segwitInputs = feeInputCounts?.segwit ?? inputs.length - taprootInputs;
+  const estimatedVBytes = estimateVBytes(taprootInputs, segwitInputs, outputs.length + 1 + additionalOutputCount);
   const fee = Math.ceil(estimatedVBytes * feeRate);
   const finalChange = totalIn - cursor - fee;
 

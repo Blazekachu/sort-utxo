@@ -68,20 +68,34 @@ export async function signPsbt(
   psbtBase64: string,
   inputsToSign: Array<{ index: number; address: string }>
 ): Promise<SignResult> {
+  return signPsbtWithBroadcast(psbtBase64, inputsToSign, true);
+}
+
+/** Signs a partial PSBT without broadcasting so several wallet accounts can sign it in turn. */
+export async function signPsbtForConsolidation(
+  psbtBase64: string,
+  inputsToSign: Array<{ index: number; address: string }>
+): Promise<SignResult> {
+  return signPsbtWithBroadcast(psbtBase64, inputsToSign, false);
+}
+
+async function signPsbtWithBroadcast(
+  psbtBase64: string,
+  inputsToSign: Array<{ index: number; address: string }>,
+  broadcast: boolean,
+): Promise<SignResult> {
   const signInputs: Record<string, number[]> = {};
   for (const { address, index } of inputsToSign) {
     if (!signInputs[address]) signInputs[address] = [];
     signInputs[address].push(index);
   }
 
-  if (activeProvider === 'leather') return signPsbtLeather(psbtBase64, signInputs);
+  if (activeProvider === 'leather') return signPsbtLeather(psbtBase64, signInputs, broadcast);
 
-  // broadcast: true — the wallet signs AND broadcasts through its own backend.
-  // The caller falls back to a manual broadcast when no txid comes back.
   const response = await Wallet.request('signPsbt', {
     psbt: psbtBase64,
     signInputs,
-    broadcast: true,
+    broadcast,
   });
 
   if (response.status === 'error') {
@@ -160,12 +174,16 @@ async function connectLeather(): Promise<WalletState> {
   return { connected: true, taprootAddress: tapAddr, paymentAddress: payAddr, publicKey: pubKey };
 }
 
-async function signPsbtLeather(psbtBase64: string, signInputs: Record<string, number[]>): Promise<SignResult> {
+async function signPsbtLeather(
+  psbtBase64: string,
+  signInputs: Record<string, number[]>,
+  broadcast: boolean,
+): Promise<SignResult> {
   const provider = getLeatherProvider();
   const result = await provider.request('signPsbt', {
     hex: hexFromBase64(psbtBase64),
     signAtIndex: Object.values(signInputs).flat(),
-    broadcast: true,
+    broadcast,
   }) as { result: { hex?: string; txid?: string } };
   const { hex, txid } = result.result;
   return { txid, signedPsbt: hex ? base64FromHex(hex) : undefined };

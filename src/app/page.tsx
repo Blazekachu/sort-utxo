@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback } from 'react';
+import Link from 'next/link';
 import { useSortStore } from '@/store/sortStore';
 import { setMempoolNetwork, fetchUtxos, fetchFeeRates } from '@/lib/api/mempool';
 import { setOrdNetwork } from '@/lib/api/ord';
@@ -97,13 +98,16 @@ export default function Home() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-white">Sort UTXO</h1>
-          {wallet.connected && (
-            <span className={`text-xs font-medium px-2 py-1 rounded ${
-              isTestnet ? 'bg-yellow-900/50 text-yellow-400 border border-yellow-700' : 'bg-green-900/50 text-green-400 border border-green-700'
-            }`}>
-              {isTestnet ? 'Testnet4' : 'Mainnet'}
-            </span>
-          )}
+          <div className="flex items-center gap-3">
+            <Link href="/consolidate" className="text-xs text-orange-400 hover:underline">Consolidate accounts</Link>
+            {wallet.connected && (
+              <span className={`text-xs font-medium px-2 py-1 rounded ${
+                isTestnet ? 'bg-yellow-900/50 text-yellow-400 border border-yellow-700' : 'bg-green-900/50 text-green-400 border border-green-700'
+              }`}>
+                {isTestnet ? 'Testnet4' : 'Mainnet'}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Wallet */}

@@ -99,6 +99,7 @@ export default function Home() {
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-white">Sort UTXO</h1>
           <div className="flex items-center gap-3">
+            <Link href="/compose" className="text-xs text-orange-400 hover:underline">Compose</Link>
             <Link href="/consolidate" className="text-xs text-orange-400 hover:underline">Consolidate accounts</Link>
             {wallet.connected && (
               <span className={`text-xs font-medium px-2 py-1 rounded ${

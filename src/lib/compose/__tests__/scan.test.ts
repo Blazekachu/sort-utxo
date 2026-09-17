@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { mapOrdOutputToCompose } from '../scan';
+import type { ComposeOrdOutput } from '../ord';
 
 const txid = 'a'.repeat(64);
 
@@ -31,6 +32,17 @@ describe('mapOrdOutputToCompose', () => {
     });
     expect(u.kind).toBe('rune');
     expect(u.assets.some((a) => a.kind === 'inscription' && a.offset === 0)).toBe(true);
+  });
+
+  it('treats omitted inscriptions and runes as empty', () => {
+    const u = mapOrdOutputToCompose({
+      txid, vout: 0, value: 1000, confirmed: true,
+      address: 'tb1qsegwit', source: 'payment',
+      output: {} as ComposeOrdOutput,
+      inscriptionOffsets: new Map(),
+    });
+    expect(u.kind).toBe('plain');
+    expect(u.satRanges).toBeNull();
   });
 
   it('sets satRanges null when ord omits them', () => {

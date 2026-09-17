@@ -18,6 +18,7 @@ export interface GrindParams {
   config: ComposeVanityConfig;
   onProgress: (progress: ComposeVanityProgress) => void;
   onFound: (nonce: Uint8Array, txid: string) => void;
+  onError?: (message: string) => void;
 }
 
 export class VanityGrinder {
@@ -26,12 +27,17 @@ export class VanityGrinder {
   start(params: GrindParams): void {
     this.stop();
 
-    this.worker = new Worker(
-      new URL('./worker.ts', import.meta.url),
-      { type: 'module' },
-    );
+    const { txTemplate, nonceOffset, nonceLength, config, onProgress, onFound, onError } = params;
 
-    const { txTemplate, nonceOffset, nonceLength, config, onProgress, onFound } = params;
+    try {
+      this.worker = new Worker(
+        new URL('./worker.ts', import.meta.url),
+        { type: 'module' },
+      );
+    } catch (err) {
+      onError?.(err instanceof Error ? err.message : 'Vanity worker failed to start.');
+      return;
+    }
 
     this.worker.onmessage = (event: MessageEvent) => {
       const data = event.data;
@@ -58,7 +64,10 @@ export class VanityGrinder {
     };
 
     this.worker.onerror = (err: ErrorEvent) => {
-      console.error('[VanityGrinder] Worker error:', err.message);
+      const message = err.message || 'Vanity worker failed.';
+      console.error('[VanityGrinder] Worker error:', message);
+      onError?.(message);
+      this.stop();
     };
 
     this.worker.postMessage({

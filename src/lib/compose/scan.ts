@@ -16,17 +16,19 @@ export function classifyAddressKind(address: string): AddressKind {
 }
 
 function deriveKind(output: ComposeOrdOutput): ComposeUtxoKind {
-  if (Object.keys(output.runes).length > 0) return 'rune';
-  if (output.inscriptions.length > 0) return 'inscription';
+  const runes = output.runes ?? {};
+  const inscriptions = output.inscriptions ?? [];
+  if (Object.keys(runes).length > 0) return 'rune';
+  if (inscriptions.length > 0) return 'inscription';
   return 'plain';
 }
 
 function toAssets(output: ComposeOrdOutput, inscriptionOffsets: Map<string, number>): Asset[] {
   const assets: Asset[] = [];
-  for (const id of output.inscriptions) {
+  for (const id of output.inscriptions ?? []) {
     assets.push({ kind: 'inscription', id, offset: inscriptionOffsets.get(id) ?? 0 });
   }
-  for (const [name, bal] of Object.entries(output.runes)) {
+  for (const [name, bal] of Object.entries(output.runes ?? {})) {
     assets.push({ kind: 'rune', name, amount: BigInt(bal.amount), divisibility: bal.divisibility });
   }
   return assets;
@@ -89,7 +91,7 @@ export async function scanComposeUtxos(
     try {
       const output = await fetchComposeOrdOutput(chain, utxo.txid, utxo.vout);
       const inscriptionOffsets = new Map<string, number>();
-      for (const id of output.inscriptions) {
+      for (const id of output.inscriptions ?? []) {
         inscriptionOffsets.set(id, await getComposeInscriptionOffset(chain, id));
       }
       labeled.push(mapOrdOutputToCompose({

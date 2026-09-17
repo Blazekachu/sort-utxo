@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { WalletState, FeeRates, ScanStatus } from '@/types';
 import type { ComposeUtxo } from '@/lib/compose/types';
+import { canComposeSpend } from '@/lib/compose/gates';
 
 export interface ComposeOutputRow {
   id: string;
@@ -20,14 +21,6 @@ function keyOf(u: ComposeUtxo): string {
   return `${u.txid}:${u.vout}`;
 }
 
-function canSpend(u: ComposeUtxo): boolean {
-  return u.confirmed && u.satRanges !== null && u.kind !== 'rune' && u.kind !== 'unknown';
-}
-
-function canFee(u: ComposeUtxo): boolean {
-  return canSpend(u) && u.source === 'payment' && u.kind === 'plain';
-}
-
 const defaultWallet: WalletState = {
   connected: false,
   taprootAddress: '',
@@ -40,10 +33,10 @@ export interface ComposeStore {
   setWallet: (wallet: WalletState) => void;
   utxos: ComposeUtxo[];
   setUtxos: (utxos: ComposeUtxo[]) => void;
-  spendKeys: Set<string>;
-  feeKeys: Set<string>;
-  toggleSpend: (key: string) => void;
-  toggleFee: (key: string) => void;
+  /** Selected outpoints in vin order (click order). Last must be plain payment. */
+  inputOrder: string[];
+  toggleInput: (key: string) => void;
+  moveInput: (key: string, dir: 'up' | 'down') => void;
   outputRows: ComposeOutputRow[];
   setOutputRows: (rows: ComposeOutputRow[]) => void;
   opReturnText: string;
@@ -71,32 +64,25 @@ export const useComposeStore = create<ComposeStore>((set, get) => ({
   wallet: defaultWallet,
   setWallet: (wallet) => set({ wallet }),
   utxos: [],
-  setUtxos: (utxos) => set({ utxos, spendKeys: new Set(), feeKeys: new Set() }),
-  spendKeys: new Set(),
-  feeKeys: new Set(),
-  toggleSpend: (key) => {
+  setUtxos: (utxos) => set({ utxos, inputOrder: [] }),
+  inputOrder: [],
+  toggleInput: (key) => {
     const utxo = get().utxos.find((u) => keyOf(u) === key);
-    if (!utxo || !canSpend(utxo)) return;
-    const spendKeys = new Set(get().spendKeys);
-    const feeKeys = new Set(get().feeKeys);
-    if (spendKeys.has(key)) spendKeys.delete(key);
-    else {
-      spendKeys.add(key);
-      feeKeys.delete(key);
-    }
-    set({ spendKeys, feeKeys, vanityTxid: null, vanityLocktime: null });
+    if (!utxo || !canComposeSpend(utxo)) return;
+    const inputOrder = [...get().inputOrder];
+    const idx = inputOrder.indexOf(key);
+    if (idx >= 0) inputOrder.splice(idx, 1);
+    else inputOrder.push(key);
+    set({ inputOrder, vanityTxid: null, vanityLocktime: null });
   },
-  toggleFee: (key) => {
-    const utxo = get().utxos.find((u) => keyOf(u) === key);
-    if (!utxo || !canFee(utxo)) return;
-    const spendKeys = new Set(get().spendKeys);
-    const feeKeys = new Set(get().feeKeys);
-    if (feeKeys.has(key)) feeKeys.delete(key);
-    else {
-      feeKeys.add(key);
-      spendKeys.delete(key);
-    }
-    set({ spendKeys, feeKeys, vanityTxid: null, vanityLocktime: null });
+  moveInput: (key, dir) => {
+    const inputOrder = [...get().inputOrder];
+    const idx = inputOrder.indexOf(key);
+    if (idx < 0) return;
+    const swap = dir === 'up' ? idx - 1 : idx + 1;
+    if (swap < 0 || swap >= inputOrder.length) return;
+    [inputOrder[idx], inputOrder[swap]] = [inputOrder[swap], inputOrder[idx]];
+    set({ inputOrder, vanityTxid: null, vanityLocktime: null });
   },
   outputRows: [],
   setOutputRows: (outputRows) => set({ outputRows, vanityTxid: null, vanityLocktime: null }),
@@ -121,8 +107,7 @@ export const useComposeStore = create<ComposeStore>((set, get) => ({
   reset: () => set({
     wallet: defaultWallet,
     utxos: [],
-    spendKeys: new Set(),
-    feeKeys: new Set(),
+    inputOrder: [],
     outputRows: [],
     opReturnText: '',
     vanityPrefix: '',

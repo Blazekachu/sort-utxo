@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planCompose } from '../plan';
+import { orderComposeInputs, planCompose } from '../plan';
 import type { ComposeUtxo } from '../types';
 
 const TAPROOT = 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr';
@@ -14,7 +14,7 @@ function makeUtxo(partial: Partial<ComposeUtxo> & Pick<ComposeUtxo, 'value' | 's
     value,
     confirmed: partial.confirmed ?? true,
     address: partial.address ?? (partial.source === 'taproot' ? TAPROOT : SEGWIT),
-    addressKind: partial.source === 'taproot' ? 'taproot' : 'p2wpkh',
+    addressKind: partial.addressKind ?? (partial.source === 'taproot' ? 'taproot' : 'p2wpkh'),
     source: partial.source,
     kind: partial.kind,
     assets: partial.assets ?? [],
@@ -23,6 +23,44 @@ function makeUtxo(partial: Partial<ComposeUtxo> & Pick<ComposeUtxo, 'value' | 's
       : partial.satRanges,
   };
 }
+
+describe('orderComposeInputs', () => {
+  it('follows selection order, not table order', () => {
+    const upper = makeUtxo({ value: 4590, source: 'payment', kind: 'plain', txid: 'aa'.repeat(32), vout: 0 });
+    const lower = makeUtxo({ value: 4000, source: 'payment', kind: 'plain', txid: 'bb'.repeat(32), vout: 1 });
+    const ordered = orderComposeInputs(
+      [upper, lower],
+      [`${lower.txid}:${lower.vout}`, `${upper.txid}:${upper.vout}`],
+    );
+    expect(ordered.map((i) => i.utxo.value)).toEqual([4000, 4590]);
+    expect(ordered.map((i) => i.role)).toEqual(['spend', 'fee']);
+  });
+
+  it('marks only the last selected UTXO as fee', () => {
+    const a = makeUtxo({ value: 1000, source: 'taproot', kind: 'plain', txid: 'aa'.repeat(32) });
+    const b = makeUtxo({ value: 2000, source: 'payment', kind: 'plain', txid: 'bb'.repeat(32) });
+    const ordered = orderComposeInputs([a, b], [`${a.txid}:${a.vout}`, `${b.txid}:${b.vout}`]);
+    expect(ordered.map((i) => i.role)).toEqual(['spend', 'fee']);
+  });
+});
+
+describe('planCompose last-payment gate', () => {
+  it('refuses when the last input is not a plain payment UTXO', () => {
+    const pay = makeUtxo({ value: 4000, source: 'payment', kind: 'plain', txid: 'aa'.repeat(32) });
+    const tap = makeUtxo({ value: 5000, source: 'taproot', kind: 'plain', txid: 'bb'.repeat(32) });
+    const plan = planCompose({
+      inputs: [
+        { utxo: pay, role: 'spend' },
+        { utxo: tap, role: 'fee' },
+      ],
+      outputRows: [{ value: 1000, address: SEGWIT }],
+      feeRate: 1,
+      changeAddress: SEGWIT,
+    });
+    expect(plan.ok).toBe(false);
+    expect(plan.error).toMatch(/last input|payment/i);
+  });
+});
 
 describe('planCompose', () => {
   it('puts a mid-UTXO sat at output offset 0 when the pre-pad row equals that offset', () => {
@@ -41,9 +79,10 @@ describe('planCompose', () => {
       outputRows: [
         { value: 6000, address: SEGWIT },
         { value: 330, address: TAPROOT },
-        { value: 55000, address: SEGWIT },
+        { value: 55670, address: SEGWIT },
       ],
       feeRate: 1,
+      changeAddress: SEGWIT,
     });
     expect(plan.ok).toBe(true);
     expect(plan.outputs[1].inscriptions).toEqual([{ id: 'abci0', outputOffset: 0 }]);
@@ -67,9 +106,10 @@ describe('planCompose', () => {
       outputRows: [
         { value: 6000, address: SEGWIT },
         { value: 330, address: TAPROOT },
-        { value: 55000, address: SEGWIT },
+        { value: 55670, address: SEGWIT },
       ],
       feeRate: 1,
+      changeAddress: SEGWIT,
     });
     expect(plan.ok).toBe(true);
     expect(plan.outputs[1].satEnd).toBeLessThanOrEqual(62000);
@@ -113,6 +153,7 @@ describe('planCompose', () => {
         { value: 9000, address: SEGWIT },
       ],
       feeRate: 1,
+      changeAddress: SEGWIT,
     });
     expect(plan.ok).toBe(true);
     expect(plan.outputs[1].satStart).toBe(61900);
@@ -130,10 +171,10 @@ describe('planCompose', () => {
     const fee = makeUtxo({ value: 10000, source: 'payment', kind: 'plain', txid: 'b'.repeat(64) });
     const rows = [
       { value: 330, address: TAPROOT },
-      { value: 19000, address: SEGWIT },
+      { value: 19670, address: SEGWIT },
     ];
-    const without = planCompose({ inputs: [{ utxo: spend, role: 'spend' }, { utxo: fee, role: 'fee' }], outputRows: rows, feeRate: 1 });
-    const withMsg = planCompose({ inputs: [{ utxo: spend, role: 'spend' }, { utxo: fee, role: 'fee' }], outputRows: rows, feeRate: 1, opReturnText: 'hello' });
+    const without = planCompose({ inputs: [{ utxo: spend, role: 'spend' }, { utxo: fee, role: 'fee' }], outputRows: rows, feeRate: 1, changeAddress: SEGWIT });
+    const withMsg = planCompose({ inputs: [{ utxo: spend, role: 'spend' }, { utxo: fee, role: 'fee' }], outputRows: rows, feeRate: 1, opReturnText: 'hello', changeAddress: SEGWIT });
     expect(without.ok).toBe(true);
     expect(withMsg.ok).toBe(true);
     expect(withMsg.outputs[0].inscriptions).toEqual(without.outputs[0].inscriptions);
@@ -151,23 +192,78 @@ describe('planCompose', () => {
     expect(plan.error).toMatch(/rune/i);
   });
 
-  it('refuses missing satRanges', () => {
-    const u = makeUtxo({ value: 10000, source: 'payment', kind: 'plain', satRanges: null });
+  it('plans by offset when satRanges are missing (ord sat_index off)', () => {
+    const spend = makeUtxo({ value: 20000, source: 'payment', kind: 'plain', satRanges: null });
+    const feeUtxo = makeUtxo({ value: 10000, source: 'payment', kind: 'plain', txid: 'b'.repeat(64), satRanges: null });
     const plan = planCompose({
-      inputs: [{ utxo: u, role: 'spend' }],
-      outputRows: [{ value: 10000, address: SEGWIT }],
+      inputs: [
+        { utxo: spend, role: 'spend' },
+        { utxo: feeUtxo, role: 'fee' },
+      ],
+      outputRows: [{ value: 20000, address: SEGWIT }],
       feeRate: 1,
+      changeAddress: SEGWIT,
+    });
+    expect(plan.ok).toBe(true);
+    expect(plan.outputs[0].satStart).toBe(0);
+    expect(plan.outputs[0].satEnd).toBe(20000);
+    expect(plan.outputs[0].ranges).toEqual([]);
+  });
+
+  it('returns leftover payment sats as change instead of dumping them as fee', () => {
+    const pay = '2N9jgeRZJvZuhSLnpbod4WhVTSeoGwCnH59';
+    const spend = makeUtxo({
+      value: 4449,
+      source: 'payment',
+      kind: 'plain',
+      address: pay,
+      addressKind: 'p2sh-p2wpkh',
+      satRanges: null,
+    });
+    const plan = planCompose({
+      inputs: [{ utxo: spend, role: 'fee' }],
+      outputRows: [
+        { value: 1000, address: pay },
+        { value: 1500, address: pay },
+      ],
+      feeRate: 1,
+      changeAddress: pay,
+    });
+    expect(plan.ok).toBe(true);
+    expect(plan.outputs).toHaveLength(3);
+    expect(plan.outputs[2]?.isChange).toBe(true);
+    expect(plan.outputs[2]?.address).toBe(pay);
+    expect(plan.outputs[0]).toMatchObject({ satStart: 0, satEnd: 1000 });
+    expect(plan.outputs[1]).toMatchObject({ satStart: 1000, satEnd: 2500 });
+    const outSum = plan.outputs.reduce((s, o) => s + o.value, 0);
+    expect(outSum + plan.fee).toBe(4449);
+    expect(plan.fee).toBe(plan.estimatedVBytes);
+    expect(plan.fee).toBeLessThan(500);
+    expect(plan.outputs[2].value).toBeGreaterThan(546);
+  });
+
+  it('still refuses when the fee tail would consume taproot sats', () => {
+    const spend = makeUtxo({ value: 4000, source: 'taproot', kind: 'plain', satRanges: null });
+    const plan = planCompose({
+      inputs: [{ utxo: spend, role: 'spend' }],
+      outputRows: [
+        { value: 1000, address: SEGWIT },
+        { value: 1000, address: SEGWIT },
+      ],
+      feeRate: 1,
+      changeAddress: SEGWIT,
     });
     expect(plan.ok).toBe(false);
-    expect(plan.error).toMatch(/range/i);
+    expect(plan.error).toMatch(/payment/i);
   });
 
   it('refuses a 1-sat taproot output', () => {
     const u = makeUtxo({ value: 10000, source: 'payment', kind: 'plain' });
     const plan = planCompose({
-      inputs: [{ utxo: u, role: 'spend' }],
+      inputs: [{ utxo: u, role: 'fee' }],
       outputRows: [{ value: 1, address: TAPROOT }],
       feeRate: 1,
+      changeAddress: SEGWIT,
     });
     expect(plan.ok).toBe(false);
     expect(plan.error).toMatch(/dust/i);
@@ -188,7 +284,7 @@ describe('planCompose', () => {
     expect(plan.error).toMatch(/payment/i);
   });
 
-  it('fee equals unassigned tail', () => {
+  it('pays the selected fee rate and returns leftover as payment change', () => {
     const spend = makeUtxo({ value: 20000, source: 'payment', kind: 'plain' });
     const feeUtxo = makeUtxo({ value: 10000, source: 'payment', kind: 'plain', txid: 'b'.repeat(64) });
     const plan = planCompose({
@@ -198,9 +294,12 @@ describe('planCompose', () => {
       ],
       outputRows: [{ value: 20000, address: SEGWIT }],
       feeRate: 1,
+      changeAddress: SEGWIT,
     });
     expect(plan.ok).toBe(true);
     const outSum = plan.outputs.reduce((s, o) => s + o.value, 0);
     expect(30000 - outSum).toBe(plan.fee);
+    expect(plan.outputs.some((o) => o.isChange)).toBe(true);
+    expect(plan.fee).toBe(plan.estimatedVBytes);
   });
 });

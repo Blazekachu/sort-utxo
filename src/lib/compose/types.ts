@@ -22,5 +22,6 @@ export interface ComposeUtxo {
   source: 'taproot' | 'payment';
   kind: ComposeUtxoKind;
   assets: Asset[];
+  /** Absolute sat numbers when ord has a sat index. Null is normal on signet (`sat_index: false`). */
   satRanges: SatRangeView[] | null;
 }

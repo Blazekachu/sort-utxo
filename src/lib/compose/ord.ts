@@ -19,12 +19,17 @@ function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
 }
 
 export type ComposeOrdStatus =
-  | { ok: true; height: number; chain: string }
+  | { ok: true; height: number; chain: string; satIndex: boolean }
   | { ok: false; reason: 'wedged'; height: number; chain: string };
 
-export function parseComposeOrdStatus(raw: { height: number; chain: string; unrecoverably_reorged: boolean }): ComposeOrdStatus {
+export function parseComposeOrdStatus(raw: {
+  height: number;
+  chain: string;
+  unrecoverably_reorged: boolean;
+  sat_index?: boolean;
+}): ComposeOrdStatus {
   if (raw.unrecoverably_reorged) return { ok: false, reason: 'wedged', height: raw.height, chain: raw.chain };
-  return { ok: true, height: raw.height, chain: raw.chain };
+  return { ok: true, height: raw.height, chain: raw.chain, satIndex: raw.sat_index === true };
 }
 
 export async function assertComposeOrdHealthy(chain: ComposeChain): Promise<void> {
@@ -56,8 +61,8 @@ export async function getComposeInscriptionOffset(chain: ComposeChain, id: strin
 }
 
 export interface ComposeOrdOutput {
-  inscriptions: string[];
-  runes: Record<string, { amount: number; divisibility: number }>;
+  inscriptions?: string[];
+  runes?: Record<string, { amount: number; divisibility: number }>;
   value?: number;
   sat_ranges?: [number, number][] | null;
 }

@@ -11,7 +11,7 @@
 
 Sort extracts misplaced inscriptions onto 546-sat taproot outputs. It does not let you choose cuts, postage, fee source, or output layout. The need is a **blank, sat-aware composer**: inspect every wallet UTXO (sat ranges, address kind, outpoint, Plain / Inscription / Rune, rarity tags), pick inputs, then define outputs by value and destination, with a live FIFO preview.
 
-First real job: split a mixed UTXO (e.g. ~62k sats with several rarity ranges) so chosen sats land at **offset 0** of new outputs with **330** (`1+329`) or **546** (`1+545`) postage, fee paid only from a **payment** UTXO.
+First real job: split a mixed UTXO (e.g. ~62k sats) so chosen **offsets** land at **offset 0** of new outputs with **330** (`1+329`) or **546** (`1+545`) postage, fee paid only from a **payment** UTXO. Signet local ord does **not** index sats (disk); rarity-aware cuts need sat numbers and are unavailable on that indexer.
 
 ---
 
@@ -116,7 +116,7 @@ interface ComposeUtxo {
   source: 'taproot' | 'payment';
   kind: ComposeUtxoKind;  // rune if any rune present (even with inscriptions)
   assets: Asset[];        // existing Asset union: inscription {id, offset} | rune {name, amount, divisibility}
-  satRanges: SatRangeView[] | null; // null => missing from ord; cannot compose
+  satRanges: SatRangeView[] | null; // null on signet when sat_index is off (deliberate); compose by offset
 }
 ```
 
@@ -138,11 +138,11 @@ interface ComposeUtxo {
 
 Two groups; a UTXO cannot be in both.
 
-**Spend inputs** (first on the sat line), user order, visible reorder: any confirmed UTXO with sat ranges that is not `rune` or `unknown`. This includes rare/inscription UTXOs on the **payment** address — those are spend inputs, not the fee slot.
+**Spend inputs** (first on the sat line): any confirmed UTXO that is not `rune` or `unknown`, in **user selection order** (click append + ↑↓ rearrange). Signet local ord is run **without** `--index-sats` (disk). Compose by UTXO offset and inscription satpoints.
 
-**Fee/padding inputs** (always last): additional UTXOs with `source === 'payment'` and `kind === 'plain'` only. Native (`bc1q` / `tb1q`) and nested (`3…` / `2…`) are both allowed. Taproot cannot occupy this slot.
+**Last input (fee + change):** must be `source === 'payment'` and `kind === 'plain'`. It is always the final vin. It pays the network fee and receives change at the wallet payment address. Taproot cannot occupy this last slot.
 
-Cannot add to either group: `rune`, `unknown`, `satRanges === null`, unconfirmed.
+Cannot select: `rune`, `unknown`, unconfirmed. Missing `satRanges` does not block selection.
 
 Inscription-bearing **can** be a spend input; preview must show each inscription’s absolute offset on the concatenated line.
 
@@ -158,7 +158,7 @@ Outputs fill from the concatenated input sat line in order. Planner maps each ou
 - rarity tags
 - `startsWithTaggedSat: boolean` — true when the first sat of that output is an inscription sat or has a non-common rarity tag (this is the “offset 0” check in the preview)
 
-**Fee** = `sum(inputs) - sum(sat outputs)`. There is no fee row. OP_RETURN is 0-value and is not in that sum. `estimatedVBytes` **includes** the OP_RETURN output when present. Chosen fee rate only tells the user how large the unassigned tail must be: `feeSats = ceil(estimatedVBytes * feeRate)`.
+**Fee** = `ceil(estimatedVBytes * feeRate)` at the user-selected rate. Leftover sats after user output rows and that fee are returned as a **change output to the payment address**. Leftover is not dumped as miner fee. Change below dust for the payment script is refused. OP_RETURN is 0-value and is not in the sat sum. `estimatedVBytes` **includes** the change output and OP_RETURN when present. Preview offsets are shown inclusive: a 1000-sat row at the start is `[0,999]`.
 
 ### 6.3 OP_RETURN (optional, off by default)
 
@@ -174,12 +174,12 @@ Outputs fill from the concatenated input sat line in order. Planner maps each ou
 | Condition | Action |
 |---|---|
 | Any selected input `kind === 'rune'` | refuse |
-| Any selected input missing sat ranges / unknown | refuse |
+| Any selected input `kind === 'unknown'` | refuse |
 | Output below policy dust for its script (P2TR **330**, P2WPKH **294**, P2SH-P2WPKH **546**) | refuse |
 | Sat output would consume past the end of **spend** inputs | refuse until a **fee/padding** payment UTXO is appended; then those payment sats appear on the line and must be assigned to postage/change rows |
 | `sum(sat outputs) > sum(inputs)` | refuse |
 | Unassigned tail `<` required fee at selected rate | refuse |
-| Required fee `> 0` and no payment input | refuse |
+| Required fee `> 0` and the unassigned tail is not entirely plain payment sats | refuse |
 | Estimated vbytes `> 100_000` (standard tx weight 400,000) | refuse |
 | OP_RETURN payload `> 80` bytes or more than one OP_RETURN | refuse |
 | Nested payment input without payment pubkey | refuse (do not widen wallet connect) |
@@ -257,7 +257,7 @@ Vitest, compose modules only, plus a check that Sort/Consolidate tests still pas
 
 **Planner:** offset-0 extract; mid-UTXO sat (6000) postage from following sats of the **same** UTXO, not from payment; near-end sat blocked without payment UTXO last, then payment sats on the line; OP_RETURN 0-value does not shift inscription offsets; fee = unassigned tail.
 
-**Gates:** rune refuse; missing ranges refuse; dust by script; no payment when fee needed; tail < fee; vbytes cap; 1-sat rows refuse; OP_RETURN 81 bytes refuse.
+**Gates:** rune refuse; unknown refuse; dust by script; no payment when fee needed; tail < fee; vbytes cap; 1-sat rows refuse; OP_RETURN 81 bytes refuse. Missing sat ranges are allowed (signet `sat_index: false`).
 
 **PSBT:** taproot key; native witness UTXO; nested redeem; every input in `signInputs`; OP_RETURN present; no non-ALL sighash.
 
@@ -268,7 +268,7 @@ Vitest, compose modules only, plus a check that Sort/Consolidate tests still pas
 **Vanity:** sequences remain final; editing an output clears nonce.
 
 **Live signet acceptance (local ord running):**
-1. Scan a mixed UTXO: all ranges, kinds, rarity, outpoint, address kind.
+1. Scan a mixed UTXO: kinds, inscription offsets, outpoint, address kind. Sat numbers/rarity omitted on signet (`sat_index: false`).
 2. Split so a chosen sat is offset 0 on a 330 or 546 taproot output; fee from payment last (native or nested).
 3. Near-end sat: build blocked until payment UTXO added; preview shows payment sats.
 4. Rune UTXO not selectable for spend.

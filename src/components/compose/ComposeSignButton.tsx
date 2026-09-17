@@ -8,19 +8,12 @@ import { bitcoinNetworkForChain, mempoolExplorerTxBase, parseWalletNetworkName }
 import { broadcastComposeTx } from '@/lib/compose/mempool';
 import { signPsbtForCompose } from '@/lib/wallet/xverse';
 import { verifySignedTx } from '@/lib/compose/signVerify';
+import { plannedTxid } from '@/lib/compose/txid';
 
 function hexToBytes(hex: string): Uint8Array {
   const out = new Uint8Array(hex.length / 2);
   for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   return out;
-}
-
-function unsignedTxid(psbt: bitcoin.Psbt): string {
-  try {
-    return psbt.extractTransaction(true).getId();
-  } catch {
-    throw new Error('Could not compute unsigned TXID.');
-  }
 }
 
 export default function ComposeSignButton() {
@@ -53,7 +46,7 @@ export default function ComposeSignButton() {
         network,
         nLockTime: vanityLocktime ?? 0,
       });
-      const planned = unsignedTxid(psbt);
+      const planned = plannedTxid(psbt);
       setStatus({ state: 'signing' });
       const signed = await signPsbtForCompose(psbt.toBase64(), inputsToSign);
       if (!signed.signedPsbt) throw new Error('Wallet did not return a signed PSBT. Not broadcasting.');
@@ -84,7 +77,6 @@ export default function ComposeSignButton() {
 
   return (
     <div className="w-full flex flex-col gap-3">
-      {!plan.ok && <p className="text-sm text-red-400">{plan.error}</p>}
       {status.state === 'error' && <p className="text-sm text-red-400">{status.message}</p>}
       {status.state === 'done' && (
         <a

@@ -1,13 +1,13 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import * as bitcoin from 'bitcoinjs-lib';
 import { useComposeStore } from '@/store/composeStore';
 import { useComposePlan } from './useComposePlan';
 import { buildComposePsbt } from '@/lib/compose/psbt';
 import { bitcoinNetworkForChain, parseWalletNetworkName } from '@/lib/compose/network';
 import { VanityGrinder } from '@/lib/compose/vanity/grinder';
 import { assertVanityHex } from '@/lib/compose/vanity/locktime';
+import { serializeForTxid } from '@/lib/compose/txid';
 
 function hexToBytes(hex: string): Uint8Array {
   const out = new Uint8Array(hex.length / 2);
@@ -71,38 +71,38 @@ export default function VanityField() {
       network,
       nLockTime: 0,
     });
-    let tx: bitcoin.Transaction;
-    try {
-      tx = psbt.extractTransaction(true);
-    } catch {
-      setError('Could not serialize unsigned tx for grind.');
-      return;
-    }
-    const template = tx.toBuffer();
+    const template = serializeForTxid(psbt);
     const nonceOffset = template.length - 4;
     const grinder = new VanityGrinder();
     grinderRef.current = grinder;
     setRunning(true);
+    setVanityTxid(null);
+    setVanityLocktime(null);
     grinder.start({
       txTemplate: template,
       nonceOffset,
       nonceLength: 4,
       config: { prefix: prefix.toLowerCase(), suffix: suffix.toLowerCase() },
-      onProgress: (p) => setProgress(`${p.attempts.toLocaleString()} · ${p.speed}/s`),
+      onProgress: (p) => setProgress(`${p.attempts.toLocaleString()} · ${p.speed}/s · best ${p.bestMatch.slice(0, 8)}…`),
       onFound: (nonce, txid) => {
         setVanityLocktime(u32le(nonce));
         setVanityTxid(txid);
         setRunning(false);
-        setProgress(`found ${txid}`);
+        setProgress(`locked ${txid}`);
+      },
+      onError: (message) => {
+        setError(message);
+        setRunning(false);
       },
     });
   }
 
   const difficulty = VanityGrinder.estimateDifficulty(prefix, suffix);
+  const pending = Boolean((prefix || suffix) && !vanityTxid && !running);
 
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-xs text-gray-500">Vanity TXID (optional) — nLockTime grind, sequences final</p>
+      <p className="text-xs text-gray-500">Vanity TXID (optional) — click Grind. Typing prefix/suffix does not change the tx until a match is locked.</p>
       <div className="flex gap-2">
         <input value={prefix} onChange={(e) => setPrefix(e.target.value.trim())} placeholder="prefix" className="w-24 rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs font-mono text-white" />
         <input value={suffix} onChange={(e) => setSuffix(e.target.value.trim())} placeholder="suffix" className="w-24 rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs font-mono text-white" />
@@ -113,6 +113,7 @@ export default function VanityField() {
         )}
       </div>
       <p className="text-xs text-gray-600">{difficulty.description}</p>
+      {pending && <p className="text-xs text-yellow-500">Not locked — this sign will use a normal TXID, not {prefix}…{suffix}.</p>}
       {progress && <p className="text-xs font-mono text-gray-400">{progress}</p>}
       {vanityTxid && <p className="text-xs font-mono text-green-400">locked {vanityTxid}</p>}
       {error && <p className="text-xs text-red-400">{error}</p>}

@@ -519,7 +519,7 @@ export interface ComposePlan {
 ```
 
 Algorithm:
-1. Validate each input: fee role ⇒ `source === 'payment'` && `kind === 'plain'`; spend/fee: not rune/unknown, satRanges non-null, confirmed.
+1. Validate each input: fee role ⇒ `source === 'payment'` && `kind === 'plain'`; spend/fee: not rune/unknown, confirmed. Missing satRanges is allowed (signet sat_index off).
 2. Order: spend in given order, then fee.
 3. Concatenate sat line; assign absolute inscription positions.
 4. Walk output rows in order; cursor starts 0; each row consumes `value` sats from the line; if cursor+value > totalIn → fail. Slice ranges/inscriptions into the output. `startsWithTaggedSat` if an inscription lands at outputOffset 0 or a non-common rarity tag includes the first sat.
@@ -546,7 +546,7 @@ describe('planCompose', () => {
   it('after a fee UTXO is appended, payment sats continue the line', () => {});
   it('OP_RETURN does not shift inscription output offsets', () => {});
   it('refuses rune spend inputs', () => {});
-  it('refuses missing satRanges', () => {});
+  it('plans by offset when satRanges are missing (signet sat_index off)', () => {});
   it('refuses a 1-sat taproot output', () => {});
   it('refuses taproot in the fee role', () => {});
   it('fee equals unassigned tail', () => {});

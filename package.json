@@ -1,7 +1,7 @@
 {
   "name": "sort-utxo",
   "version": "1.0.0",
-  "description": "",
+  "description": "Browser app to sort and compose Bitcoin Ordinals UTXOs with wallet signing — keys never leave the wallet.",
   "directories": {
     "doc": "docs"
   },
@@ -13,9 +13,24 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "bitcoin",
+    "ordinals",
+    "utxo",
+    "psbt",
+    "xverse"
+  ],
+  "author": "Blazekachu",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Blazekachu/sort-utxo.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Blazekachu/sort-utxo/issues"
+  },
+  "homepage": "https://github.com/Blazekachu/sort-utxo#readme",
+
   "dependencies": {
     "bitcoinjs-lib": "7.0.1",
     "ecpair": "^3.0.1",

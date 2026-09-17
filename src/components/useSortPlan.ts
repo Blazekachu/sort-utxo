@@ -1,4 +1,5 @@
 import { useSortStore } from '@/store/sortStore';
+import { useWalletStore } from '@/store/walletStore';
 import { classifyPlacement } from '@/types';
 import type { LabeledUtxo } from '@/types';
 import { planLedgerSort, type LedgerSortResult } from '@/lib/tx/ledgerSort';
@@ -19,7 +20,7 @@ export interface SortPlanView {
  * labels mean a 'plain' UTXO is safe to spend as fee).
  */
 export function useSortPlan(): SortPlanView {
-  const wallet = useSortStore((s) => s.wallet);
+  const wallet = useWalletStore((s) => s.wallet);
   const utxos = useSortStore((s) => s.utxos);
   const selectedKeys = useSortStore((s) => s.selectedKeys);
   const feeRate = useSortStore((s) => s.selectedFeeRate);

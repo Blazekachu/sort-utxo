@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { WalletState, FeeRates, ScanStatus } from '@/types';
+import type { FeeRates, ScanStatus } from '@/types';
 import type { ComposeUtxo } from '@/lib/compose/types';
 import { canComposeSpend } from '@/lib/compose/gates';
 
@@ -21,16 +21,7 @@ function keyOf(u: ComposeUtxo): string {
   return `${u.txid}:${u.vout}`;
 }
 
-const defaultWallet: WalletState = {
-  connected: false,
-  taprootAddress: '',
-  paymentAddress: '',
-  publicKey: '',
-};
-
 export interface ComposeStore {
-  wallet: WalletState;
-  setWallet: (wallet: WalletState) => void;
   utxos: ComposeUtxo[];
   setUtxos: (utxos: ComposeUtxo[]) => void;
   /** Selected outpoints in vin order (click order). Last must be plain payment. */
@@ -61,8 +52,6 @@ export interface ComposeStore {
 }
 
 export const useComposeStore = create<ComposeStore>((set, get) => ({
-  wallet: defaultWallet,
-  setWallet: (wallet) => set({ wallet }),
   utxos: [],
   setUtxos: (utxos) => set({ utxos, inputOrder: [] }),
   inputOrder: [],
@@ -105,7 +94,6 @@ export const useComposeStore = create<ComposeStore>((set, get) => ({
   buildStatus: { state: 'idle' },
   setBuildStatus: (buildStatus) => set({ buildStatus }),
   reset: () => set({
-    wallet: defaultWallet,
     utxos: [],
     inputOrder: [],
     outputRows: [],

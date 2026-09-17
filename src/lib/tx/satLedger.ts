@@ -127,14 +127,19 @@ export function buildSortPsbtFromLedger(params: {
   paymentAddress: string;
   internalPubkey: Uint8Array;
   network: bitcoin.Network;
+  /** Optional vanity locktime; inputs stay final (0xffffffff) so locktime is not consensus-enforced. */
+  nLockTime?: number;
 }): { psbt: bitcoin.Psbt; inputsToSign: Array<{ index: number; address: string }> } {
-  const { inputs, outputs, taprootAddress, paymentAddress, internalPubkey, network } = params;
+  const {
+    inputs, outputs, taprootAddress, paymentAddress, internalPubkey, network, nLockTime = 0,
+  } = params;
 
   const totalIn = inputs.reduce((s, u) => s + u.value, 0);
   const totalOut = outputs.reduce((s, o) => s + o.value, 0);
   if (totalOut > totalIn) throw new Error(`Outputs (${totalOut}) exceed inputs (${totalIn}).`);
 
   const psbt = new bitcoin.Psbt({ network });
+  if (nLockTime) psbt.setLocktime(nLockTime);
   const inputsToSign: Array<{ index: number; address: string }> = [];
 
   for (let i = 0; i < inputs.length; i++) {
@@ -145,6 +150,7 @@ export function buildSortPsbtFromLedger(params: {
       hash: u.txid,
       index: u.vout,
       witnessUtxo: { script: bitcoin.address.toOutputScript(address, network), value: BigInt(u.value) },
+      sequence: 0xffffffff,
     };
     if (isTaproot) psbtInput.tapInternalKey = internalPubkey;
     psbt.addInput(psbtInput as unknown as Parameters<typeof psbt.addInput>[0]);

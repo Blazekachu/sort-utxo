@@ -1,6 +1,7 @@
 import { it, expect } from 'vitest';
 import * as bitcoin from 'bitcoinjs-lib';
 import { buildSortPsbtFromLedger, type LedgerInput, type LedgerOutput } from '../satLedger';
+import { plannedTxid, serializeForTxid } from '@/lib/compose/txid';
 
 // BIP86/BIP84 mainnet test vectors (valid addresses for output scripts).
 const TAPROOT = 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr';
@@ -32,4 +33,48 @@ it('throws if outputs exceed inputs (negative fee)', () => {
     inputs, outputs, internalPubkey: new Uint8Array(32).fill(2), network: bitcoin.networks.bitcoin,
     taprootAddress: TAPROOT, paymentAddress: SEGWIT,
   })).toThrow(/exceed/i);
+});
+
+it('nLockTime is hashed into planned TXID and ends the grind template', () => {
+  const inputs: LedgerInput[] = [
+    { txid: 'a'.repeat(64), vout: 0, value: 4000, source: 'payment', inscriptionOffsets: [] },
+  ];
+  const outputs: LedgerOutput[] = [{ address: SEGWIT, value: 3000, kind: 'change' }];
+  const base = {
+    inputs, outputs, internalPubkey: new Uint8Array(32).fill(2), network: bitcoin.networks.bitcoin,
+    taprootAddress: TAPROOT, paymentAddress: SEGWIT,
+  };
+  const { psbt: unlocked } = buildSortPsbtFromLedger(base);
+  const { psbt: locked } = buildSortPsbtFromLedger({ ...base, nLockTime: 0x01020304 });
+  expect(plannedTxid(unlocked)).not.toBe(plannedTxid(locked));
+  const template = serializeForTxid(locked);
+  expect(template.slice(-4)).toEqual(Uint8Array.from([0x04, 0x03, 0x02, 0x01]));
+  expect(locked.txInputs[0].sequence).toBe(0xffffffff);
+});
+
+it('rebuilding with a ground locktime yields a matching vanity planned TXID', () => {
+  const inputs: LedgerInput[] = [
+    { txid: 'c'.repeat(64), vout: 1, value: 5000, source: 'payment', inscriptionOffsets: [] },
+  ];
+  const outputs: LedgerOutput[] = [{ address: SEGWIT, value: 4000, kind: 'change' }];
+  const base = {
+    inputs, outputs, internalPubkey: new Uint8Array(32).fill(3), network: bitcoin.networks.bitcoin,
+    taprootAddress: TAPROOT, paymentAddress: SEGWIT,
+  };
+  const prefix = 'a';
+  let found: number | null = null;
+  let foundTxid = '';
+  for (let n = 0; n < 256; n++) {
+    const { psbt } = buildSortPsbtFromLedger({ ...base, nLockTime: n });
+    const id = plannedTxid(psbt);
+    if (id.startsWith(prefix)) {
+      found = n;
+      foundTxid = id;
+      break;
+    }
+  }
+  expect(found).not.toBeNull();
+  const { psbt: again } = buildSortPsbtFromLedger({ ...base, nLockTime: found! });
+  expect(plannedTxid(again)).toBe(foundTxid);
+  expect(foundTxid.startsWith(prefix)).toBe(true);
 });

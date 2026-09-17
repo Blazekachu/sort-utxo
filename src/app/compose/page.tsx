@@ -1,12 +1,12 @@
 'use client';
 
-import { useCallback } from 'react';
-import Link from 'next/link';
+import { useCallback, useEffect } from 'react';
 import { useComposeStore } from '@/store/composeStore';
+import { useWalletStore } from '@/store/walletStore';
 import { parseWalletNetworkName } from '@/lib/compose/network';
 import { setComposeMempoolNetwork, fetchComposeUtxos, fetchComposeFeeRates } from '@/lib/compose/mempool';
 import { scanComposeUtxos } from '@/lib/compose/scan';
-import ComposeWalletBar from '@/components/compose/ComposeWalletBar';
+import WalletBar from '@/components/WalletBar';
 import UtxoPicker from '@/components/compose/UtxoPicker';
 import OutputRows from '@/components/compose/OutputRows';
 import SatPreview from '@/components/compose/SatPreview';
@@ -15,7 +15,7 @@ import VanityField from '@/components/compose/VanityField';
 import ComposeSignButton from '@/components/compose/ComposeSignButton';
 
 export default function ComposePage() {
-  const wallet = useComposeStore((s) => s.wallet);
+  const wallet = useWalletStore((s) => s.wallet);
   const scanStatus = useComposeStore((s) => s.scanStatus);
   const setScanStatus = useComposeStore((s) => s.setScanStatus);
   const setUtxos = useComposeStore((s) => s.setUtxos);
@@ -27,7 +27,7 @@ export default function ComposePage() {
   const chain = parseWalletNetworkName(wallet.network, wallet.paymentAddress);
 
   const runScan = useCallback(async () => {
-    const w = useComposeStore.getState().wallet;
+    const w = useWalletStore.getState().wallet;
     if (!w.connected) return;
     const sessionChain = parseWalletNetworkName(w.network, w.paymentAddress);
     try {
@@ -54,26 +54,28 @@ export default function ComposePage() {
     }
   }, [setScanStatus, setUtxos, setFeeRates]);
 
+  useEffect(() => {
+    if (wallet.connected && scanStatus.state === 'idle') {
+      void runScan();
+    }
+  }, [wallet.connected, scanStatus.state, runScan]);
+
   return (
     <main className="flex flex-col items-center min-h-screen p-6 md:p-8">
       <div className="w-full max-w-3xl flex flex-col gap-6">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-white">UTXO Composer</h1>
-          <div className="flex items-center gap-3">
-            <Link href="/" className="text-xs text-orange-400 hover:underline">Sort</Link>
-            <Link href="/consolidate" className="text-xs text-orange-400 hover:underline">Consolidate</Link>
-            {wallet.connected && (
-              <span className={`text-xs font-medium px-2 py-1 rounded ${
-                chain === 'signet'
-                  ? 'bg-yellow-900/50 text-yellow-400 border border-yellow-700'
-                  : 'bg-green-900/50 text-green-400 border border-green-700'
-              }`}>
-                {chain === 'signet' ? 'Signet' : 'Mainnet'}
-              </span>
-            )}
-          </div>
+          {wallet.connected && (
+            <span className={`text-xs font-medium px-2 py-1 rounded ${
+              chain === 'signet'
+                ? 'bg-yellow-900/50 text-yellow-400 border border-yellow-700'
+                : 'bg-green-900/50 text-green-400 border border-green-700'
+            }`}>
+              {chain === 'signet' ? 'Signet' : 'Mainnet'}
+            </span>
+          )}
         </div>
-        <ComposeWalletBar onConnected={runScan} />
+        <WalletBar onConnected={runScan} />
         {scanStatus.state === 'scanning' && (
           <p className="text-sm text-gray-400">Scanning {scanStatus.scanned}/{scanStatus.total}…</p>
         )}

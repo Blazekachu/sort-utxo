@@ -1,9 +1,10 @@
 'use client';
 
 import { useComposeStore } from '@/store/composeStore';
+import { useWalletStore } from '@/store/walletStore';
 
 export default function OutputRows() {
-  const wallet = useComposeStore((s) => s.wallet);
+  const wallet = useWalletStore((s) => s.wallet);
   const rows = useComposeStore((s) => s.outputRows);
   const setOutputRows = useComposeStore((s) => s.setOutputRows);
 

@@ -1,7 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { useWalletStore } from '@/store/walletStore';
 import { useSortStore } from '@/store/sortStore';
+import { useComposeStore } from '@/store/composeStore';
 import { connectWallet, disconnectWallet } from '@/lib/wallet/xverse';
 import type { WalletProvider } from '@/lib/wallet/xverse';
 
@@ -10,10 +12,10 @@ function truncateAddress(addr: string): string {
   return `${addr.slice(0, 10)}...${addr.slice(-6)}`;
 }
 
-export default function WalletBar({ onConnected }: { onConnected: () => void }) {
-  const wallet = useSortStore((s) => s.wallet);
-  const setWallet = useSortStore((s) => s.setWallet);
-  const reset = useSortStore((s) => s.reset);
+/** Shared wallet bar — one connection for Sorting, Compose, and Consolidation. */
+export default function WalletBar({ onConnected }: { onConnected?: () => void }) {
+  const wallet = useWalletStore((s) => s.wallet);
+  const setWallet = useWalletStore((s) => s.setWallet);
 
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,10 +28,10 @@ export default function WalletBar({ onConnected }: { onConnected: () => void }) 
     try {
       const state = await connectWallet(provider);
       if (state.taprootAddress === state.paymentAddress) {
-        throw new Error('Sorting requires both a taproot and a segwit address. Your wallet only returned one.');
+        throw new Error('Both a taproot and a payment address are required. Your wallet only returned one.');
       }
       setWallet(state);
-      onConnected();
+      onConnected?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect');
     } finally {
@@ -40,7 +42,8 @@ export default function WalletBar({ onConnected }: { onConnected: () => void }) 
   function handleDisconnect() {
     const state = disconnectWallet();
     setWallet(state);
-    reset();
+    useSortStore.getState().reset();
+    useComposeStore.getState().reset();
   }
 
   if (wallet.connected) {
@@ -52,7 +55,7 @@ export default function WalletBar({ onConnected }: { onConnected: () => void }) 
             <span className="font-mono text-gray-300 truncate">{truncateAddress(wallet.taprootAddress)}</span>
           </div>
           <div className="flex items-center gap-2 text-xs">
-            <span className="text-gray-500">Segwit:</span>
+            <span className="text-gray-500">Payment:</span>
             <span className="font-mono text-gray-300 truncate">{truncateAddress(wallet.paymentAddress)}</span>
           </div>
         </div>

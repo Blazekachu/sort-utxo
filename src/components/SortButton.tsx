@@ -1,17 +1,24 @@
 'use client';
 
 import { useSortStore } from '@/store/sortStore';
+import { useWalletStore } from '@/store/walletStore';
 import { useSortPlan } from './useSortPlan';
 import { buildSortPsbtFromLedger } from '@/lib/tx/satLedger';
-import { signPsbt } from '@/lib/wallet/xverse';
+import { signPsbtForSort } from '@/lib/wallet/xverse';
 import { broadcastTx, bitcoinNetworkForAddress, mempoolTxUrl } from '@/lib/api/mempool';
+import { plannedTxid } from '@/lib/compose/txid';
+import { verifySignedTx } from '@/lib/compose/signVerify';
 import * as bitcoin from 'bitcoinjs-lib';
 
 export default function SortButton() {
-  const wallet = useSortStore((s) => s.wallet);
+  const wallet = useWalletStore((s) => s.wallet);
   const selectedKeys = useSortStore((s) => s.selectedKeys);
   const sortStatus = useSortStore((s) => s.sortStatus);
   const setSortStatus = useSortStore((s) => s.setSortStatus);
+  const vanityTxid = useSortStore((s) => s.vanityTxid);
+  const vanityLocktime = useSortStore((s) => s.vanityLocktime);
+  const vanityPrefix = useSortStore((s) => s.vanityPrefix);
+  const vanitySuffix = useSortStore((s) => s.vanitySuffix);
 
   // Hooks must run unconditionally — call useSortPlan before any early return.
   const { result } = useSortPlan();
@@ -37,31 +44,39 @@ export default function SortButton() {
         paymentAddress: wallet.paymentAddress,
         internalPubkey,
         network,
+        nLockTime: vanityLocktime ?? 0,
       });
+      const planned = plannedTxid(psbt);
 
       setSortStatus({ state: 'signing' });
-      const signed = await signPsbt(psbt.toBase64(), inputsToSign);
-
-      let txid: string;
-      if (signed.txid) {
-        // The wallet signed and broadcast the transaction through its own backend.
-        txid = signed.txid;
-      } else if (signed.signedPsbt) {
-        // Wallet signed but did not broadcast — fall back to the Esplora providers.
-        setSortStatus({ state: 'broadcasting' });
-        const signedPsbt = bitcoin.Psbt.fromBase64(signed.signedPsbt, { network });
-        try {
-          signedPsbt.finalizeAllInputs();
-        } catch {
-          // The wallet may have already finalized the inputs; extractTransaction
-          // below still surfaces a real problem if they genuinely are not final.
-        }
-        const txHex = signedPsbt.extractTransaction().toHex();
-        txid = await broadcastTx(txHex);
-      } else {
-        throw new Error('Wallet returned neither a txid nor a signed transaction. Please try again.');
+      // broadcast:false — we verify planned TXID + output values, then broadcast ourselves.
+      const signed = await signPsbtForSort(psbt.toBase64(), inputsToSign);
+      if (!signed.signedPsbt) {
+        throw new Error('Wallet did not return a signed PSBT. Not broadcasting.');
       }
 
+      const signedPsbt = bitcoin.Psbt.fromBase64(signed.signedPsbt, { network });
+      try {
+        signedPsbt.finalizeAllInputs();
+      } catch {
+        // The wallet may have already finalized the inputs; extractTransaction
+        // below still surfaces a real problem if they genuinely are not final.
+      }
+      const tx = signedPsbt.extractTransaction();
+      const signedTxid = tx.getId();
+      verifySignedTx({
+        signedTxid,
+        plannedTxid: planned,
+        vanityTarget: vanityTxid ? { prefix: vanityPrefix, suffix: vanitySuffix } : undefined,
+      });
+      for (let i = 0; i < result.ledger.outputs.length; i++) {
+        if (Number(tx.outs[i].value) !== result.ledger.outputs[i].value) {
+          throw new Error('Signed outputs do not match the plan. Not broadcasting.');
+        }
+      }
+
+      setSortStatus({ state: 'broadcasting' });
+      const txid = await broadcastTx(tx.toHex());
       setSortStatus({ state: 'done', txid });
     } catch (err) {
       setSortStatus({
@@ -113,6 +128,11 @@ export default function SortButton() {
         <p className="text-xs text-gray-500 text-center">
           Estimated fee: ~{result.ledger.fee.toLocaleString()} sats
           {result.feeUtxos.length > 0 && ` (+${result.feeUtxos.length} fee input${result.feeUtxos.length > 1 ? 's' : ''})`}
+        </p>
+      )}
+      {result.ok && sortStatus.state !== 'done' && (
+        <p className="text-xs text-gray-500 text-center">
+          Wallet signs only — we broadcast after verifying the signed tx matches the plan.
         </p>
       )}
     </div>

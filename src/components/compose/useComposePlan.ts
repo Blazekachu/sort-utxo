@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useComposeStore } from '@/store/composeStore';
+import { useWalletStore } from '@/store/walletStore';
 import { orderComposeInputs, planCompose, type ComposePlan } from '@/lib/compose/plan';
 
 export function useComposePlan(): ComposePlan {
@@ -8,7 +9,7 @@ export function useComposePlan(): ComposePlan {
   const outputRows = useComposeStore((s) => s.outputRows);
   const selectedFeeRate = useComposeStore((s) => s.selectedFeeRate);
   const opReturnText = useComposeStore((s) => s.opReturnText);
-  const paymentAddress = useComposeStore((s) => s.wallet.paymentAddress);
+  const paymentAddress = useWalletStore((s) => s.wallet.paymentAddress);
 
   return useMemo(() => {
     const inputs = orderComposeInputs(utxos, inputOrder);

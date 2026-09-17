@@ -2,6 +2,7 @@
 
 import * as bitcoin from 'bitcoinjs-lib';
 import { useComposeStore } from '@/store/composeStore';
+import { useWalletStore } from '@/store/walletStore';
 import { useComposePlan } from './useComposePlan';
 import { buildComposePsbt } from '@/lib/compose/psbt';
 import { bitcoinNetworkForChain, mempoolExplorerTxBase, parseWalletNetworkName } from '@/lib/compose/network';
@@ -17,7 +18,7 @@ function hexToBytes(hex: string): Uint8Array {
 }
 
 export default function ComposeSignButton() {
-  const wallet = useComposeStore((s) => s.wallet);
+  const wallet = useWalletStore((s) => s.wallet);
   const plan = useComposePlan();
   const status = useComposeStore((s) => s.buildStatus);
   const setStatus = useComposeStore((s) => s.setBuildStatus);

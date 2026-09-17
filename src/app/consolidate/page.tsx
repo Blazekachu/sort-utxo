@@ -1,10 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import * as bitcoin from 'bitcoinjs-lib';
 import AccountList from '@/components/consolidate/AccountList';
 import { connectWallet, signPsbtForConsolidation } from '@/lib/wallet/xverse';
+import { useWalletStore } from '@/store/walletStore';
 import { broadcastTx, bitcoinNetworkForAddress, fetchFeeRates, fetchUtxos, mempoolTxUrl, setMempoolNetwork } from '@/lib/api/mempool';
 import { setOrdNetwork } from '@/lib/api/ord';
 import { scanAndLabelUtxos } from '@/lib/scanner/label';
@@ -54,7 +54,13 @@ export default function ConsolidatePage() {
 
   async function addActiveAccount() {
     try {
-      const wallet = await connectWallet();
+      const shared = useWalletStore.getState().wallet;
+      const wallet = shared.connected
+        ? shared
+        : await connectWallet().then((state) => {
+            useWalletStore.getState().setWallet(state);
+            return state;
+          });
       if (accounts.some((account) => account.paymentAddress === wallet.paymentAddress || account.taprootAddress === wallet.taprootAddress)) {
         throw new Error('That Xverse account has already been collected.');
       }
@@ -180,9 +186,9 @@ export default function ConsolidatePage() {
   return (
     <main className="flex min-h-screen flex-col items-center p-6 md:p-8">
       <div className="w-full max-w-3xl flex flex-col gap-6">
-        <div className="flex items-center justify-between">
-          <div><h1 className="text-2xl font-bold text-white">Multi-account consolidation</h1><p className="text-sm text-gray-400">One transaction, signed once by each contributing Xverse account.</p></div>
-          <Link href="/" className="text-sm text-orange-400 hover:underline">← Back to Sort</Link>
+        <div>
+          <h1 className="text-2xl font-bold text-white">Multi-account consolidation</h1>
+          <p className="text-sm text-gray-400">One transaction, signed once by each contributing Xverse account.</p>
         </div>
         <section className="rounded-lg border border-gray-800 bg-gray-900/60 p-4 flex flex-col gap-3">
           <h2 className="font-semibold text-white">1. Collect accounts</h2>

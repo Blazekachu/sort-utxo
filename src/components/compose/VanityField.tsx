@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { useComposeStore } from '@/store/composeStore';
+import { useWalletStore } from '@/store/walletStore';
 import { useComposePlan } from './useComposePlan';
 import { buildComposePsbt } from '@/lib/compose/psbt';
 import { bitcoinNetworkForChain, parseWalletNetworkName } from '@/lib/compose/network';
@@ -20,7 +21,7 @@ function u32le(bytes: Uint8Array): number {
 }
 
 export default function VanityField() {
-  const wallet = useComposeStore((s) => s.wallet);
+  const wallet = useWalletStore((s) => s.wallet);
   const prefix = useComposeStore((s) => s.vanityPrefix);
   const suffix = useComposeStore((s) => s.vanitySuffix);
   const setPrefix = useComposeStore((s) => s.setVanityPrefix);

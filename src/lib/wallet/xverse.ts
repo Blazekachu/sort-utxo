@@ -98,6 +98,14 @@ export async function signPsbtForCompose(
   return signPsbtForConsolidation(psbtBase64, inputsToSign);
 }
 
+/** Signs without broadcasting so Sort can verify txid and layout first. */
+export async function signPsbtForSort(
+  psbtBase64: string,
+  inputsToSign: Array<{ index: number; address: string }>,
+): Promise<SignResult> {
+  return signPsbtForConsolidation(psbtBase64, inputsToSign);
+}
+
 async function signPsbtWithBroadcast(
   psbtBase64: string,
   inputsToSign: Array<{ index: number; address: string }>,

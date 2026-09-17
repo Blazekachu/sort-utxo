@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback } from 'react';
-import Link from 'next/link';
+import { useCallback, useEffect } from 'react';
 import { useSortStore } from '@/store/sortStore';
+import { useWalletStore } from '@/store/walletStore';
 import { setMempoolNetwork, fetchUtxos, fetchFeeRates } from '@/lib/api/mempool';
 import { setOrdNetwork } from '@/lib/api/ord';
 import { scanAndLabelUtxos } from '@/lib/scanner/label';
@@ -14,13 +14,14 @@ import StatusBanner from '@/components/StatusBanner';
 import UtxoTable from '@/components/UtxoTable';
 import FeeSelector from '@/components/FeeSelector';
 import SortButton from '@/components/SortButton';
+import SortVanityField from '@/components/SortVanityField';
 
 function isTestnetAddress(address: string): boolean {
   return address.startsWith('tb1') || address.startsWith('2') || address.startsWith('m') || address.startsWith('n');
 }
 
 export default function Home() {
-  const wallet = useSortStore((s) => s.wallet);
+  const wallet = useWalletStore((s) => s.wallet);
   const utxos = useSortStore((s) => s.utxos);
   const setUtxos = useSortStore((s) => s.setUtxos);
   const scanStatus = useSortStore((s) => s.scanStatus);
@@ -34,7 +35,7 @@ export default function Home() {
 
   const runScan = useCallback(async () => {
     // Read wallet directly from store to avoid stale closure
-    const w = useSortStore.getState().wallet;
+    const w = useWalletStore.getState().wallet;
     if (!w.connected) return;
 
     try {
@@ -88,6 +89,12 @@ export default function Home() {
     }
   }, [setScanStatus, setUtxos, setFeeRates, setUnconfirmedCount]);
 
+  useEffect(() => {
+    if (wallet.connected && scanStatus.state === 'idle') {
+      void runScan();
+    }
+  }, [wallet.connected, scanStatus.state, runScan]);
+
   const misplacedCount = utxos.filter((u) => classifyPlacement(u) === 'misplaced').length;
   const allCorrect = scanStatus.state === 'done' && utxos.length > 0 && misplacedCount === 0;
   const noUtxos = scanStatus.state === 'done' && utxos.length === 0;
@@ -98,17 +105,13 @@ export default function Home() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-white">Sort UTXO</h1>
-          <div className="flex items-center gap-3">
-            <Link href="/compose" className="text-xs text-orange-400 hover:underline">Compose</Link>
-            <Link href="/consolidate" className="text-xs text-orange-400 hover:underline">Consolidate accounts</Link>
-            {wallet.connected && (
-              <span className={`text-xs font-medium px-2 py-1 rounded ${
-                isTestnet ? 'bg-yellow-900/50 text-yellow-400 border border-yellow-700' : 'bg-green-900/50 text-green-400 border border-green-700'
-              }`}>
-                {isTestnet ? 'Testnet4' : 'Mainnet'}
-              </span>
-            )}
-          </div>
+          {wallet.connected && (
+            <span className={`text-xs font-medium px-2 py-1 rounded ${
+              isTestnet ? 'bg-yellow-900/50 text-yellow-400 border border-yellow-700' : 'bg-green-900/50 text-green-400 border border-green-700'
+            }`}>
+              {isTestnet ? 'Testnet4' : 'Mainnet'}
+            </span>
+          )}
         </div>
 
         {/* Wallet */}
@@ -138,6 +141,9 @@ export default function Home() {
 
         {/* Fee Selector */}
         {scanStatus.state === 'done' && <FeeSelector />}
+
+        {/* Optional vanity TXID (nLockTime grind on the current sort plan) */}
+        {scanStatus.state === 'done' && <SortVanityField />}
 
         {/* Sort Button */}
         {scanStatus.state === 'done' && <SortButton />}
